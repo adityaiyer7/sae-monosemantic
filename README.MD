@@ -32,4 +32,6 @@ This script builds the residual-stream activation dataset used to train the SAE.
 
 ## AI usage
 
-I believe AI can help boost productivity, but the goal of this project is learning and to that end, AI has only been used to generate docstrings and documentation.
+I believe AI can help boost productivity, but the goal of this project is learning and to that end, I believe it's important to monitor the usage of AI. In this project, AI has been used for the following:
+1. Generating docstrings and documentation. 
+2. Writng Regex Patterns. 
