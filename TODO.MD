@@ -1,2 +1,3 @@
 1. Add an activation hook to extract residual state with less storage overhead. 
 2. For full fidelity, implement windowing instead of truncation in the GPT2 encoder [Redundant, changed max length back to 1024]
+3. add decoder normalization during training
