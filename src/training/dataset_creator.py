@@ -59,9 +59,12 @@ class ChunkIterableGenerator(torch.utils.data.IterableDataset):
             files = self.chunk_files
         
         for chunk_file in files:
+            print(f"Loading chunk file: {chunk_file}")
             chunk_data = torch.load(chunk_file, map_location="cpu")
             token_ids = chunk_data["token_ids"]
             activations = chunk_data["filtered_residual_activations"]
+
+            print("activations and token_ids extracted")
 
             if token_ids.shape[0] != activations.shape[0]:
                 raise ValueError(
@@ -78,3 +81,4 @@ class ChunkIterableGenerator(torch.utils.data.IterableDataset):
                 if self.transform:
                     sample = self.transform(sample)
                 yield sample
+            print(f"Finished processing {chunk_file}")
