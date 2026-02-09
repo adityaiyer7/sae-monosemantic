@@ -10,7 +10,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 DATASET_PATH = os.path.join("data", "openwebtext-10k")
-CHUNK_DATA_PATH = os.path.join("data", "sae_training_chunks")
+CHUNK_DATA_PATH = os.path.join("data", "gpt2_activation_chunks")
 # TRAINING_DATASET_PATH = os.path.join("data","sae_training_data_full.pt")
 LOG_EVERY = 50
 SAVE_EVERY = 100

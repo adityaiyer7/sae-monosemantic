@@ -32,15 +32,15 @@ class SparseAutoEncoder(nn.Module):
         self.d_model = d_model
         self.d_hidden = self.d_model * expansion_factor
 
-        self.W_enc = nn.Parameter(nn.randn(self.d_model, self.d_hidden)/np.sqrt(self.d_model))
-        self.b_enc = nn.Parameter(nn.zeros(self.d_hidden))
+        self.W_enc = nn.Parameter(torch.randn(self.d_model, self.d_hidden)/np.sqrt(self.d_model))
+        self.b_enc = nn.Parameter(torch.zeros(self.d_hidden))
 
         if tie_weights:
             self.tie_weights = True
         else:
             self.tie_weights = False
-            self.W_dec = nn.Parameter(nn.randn(self.d_hidden, self.d_model)/np.sqrt(self.d_hidden))
-        self.b_dec = nn.Parameter(nn.zeros(self.d_model))
+            self.W_dec = nn.Parameter(torch.randn(self.d_hidden, self.d_model)/np.sqrt(self.d_hidden))
+        self.b_dec = nn.Parameter(torch.zeros(self.d_model))
     
     def encode(self, x : torch.Tensor) -> torch.Tensor:
         """
