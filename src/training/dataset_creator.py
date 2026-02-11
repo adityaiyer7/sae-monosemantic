@@ -1,11 +1,23 @@
 import torch
 import glob
 import re 
+import random
 
 def natural_sort_key(path):
     """Extract numbers from filename for proper numeric sorting."""
     return [int(text) if text.isdigit() else text.lower() 
             for text in re.split(r'(\d+)', path)]
+
+def split_files(chunk_dir: str, train_ratio: float = 0.8, val_ratio: float = 0.1, test_ratio: float=0.1, seed: int = 42):
+    files = sorted(glob.glob(f"{chunk_dir}/*.pt"), key = natural_sort_key)
+    rng = random.Random(seed)
+    rng.shuffle(files)
+    n = len(files)
+    n_train = int(n * train_ratio)
+    n_val = int(n * val_ratio)
+
+    return files[:n_train], files[n_train: n_train+ n_val], files[n_train+ n_val:]
+    
 
 class ChunkIterableGenerator(torch.utils.data.IterableDataset):
     """An iterable dataset that loads and yields data chunks from PyTorch files.
@@ -20,7 +32,7 @@ class ChunkIterableGenerator(torch.utils.data.IterableDataset):
         transform (callable, optional): Optional transform function to apply to each sample.
         chunk_files (list): Sorted list of chunk file paths.
     """
-    def __init__(self,chunk_dir, transform = None):
+    def __init__(self,chunk_files, transform = None):
         """Initialize the ChunkIterableGenerator.
         
         Args:
@@ -30,9 +42,8 @@ class ChunkIterableGenerator(torch.utils.data.IterableDataset):
                 and return a transformed dictionary. Defaults to None.
         """
         super().__init__()
-        self.chunk_dir = chunk_dir
         self.transform = transform
-        self.chunk_files = sorted(glob.glob(f"{self.chunk_dir}/*.pt"), key = natural_sort_key)
+        self.chunk_files = sorted(chunk_files, key=natural_sort_key)
         
 
     def __iter__(self):

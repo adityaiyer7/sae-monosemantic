@@ -1,0 +1,17 @@
+{
+  "os":  "macOS-26.1-arm64-arm-64bit",
+  "python":  "CPython 3.11.13",
+  "startedAt":  "2026-02-11T04:54:56.877078Z",
+  "program":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic/dummy.py",
+  "codePath":  "dummy.py",
+  "codePathLocal":  "dummy.py",
+  "git":  {
+    "remote":  "https://github.com/adityaiyer7/sae-monosemantic.git",
+    "commit":  "ee7070c48b691093a0b1abece03cbb8b533c6660"
+  },
+  "email":  "adityaiyer.m@gmail.com",
+  "root":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic",
+  "host":  "Adityas-MacBook-Pro.local",
+  "executable":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic/.venv/bin/python",
+  "writerId":  "5e5y0wqov7j5wiguag5jzurb5hfc6pz1"
+}

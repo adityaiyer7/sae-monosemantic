@@ -1,0 +1,37 @@
+_wandb:
+    value:
+        cli_version: 0.24.1
+        e:
+            5e5y0wqov7j5wiguag5jzurb5hfc6pz1:
+                codePath: dummy.py
+                codePathLocal: dummy.py
+                email: adityaiyer.m@gmail.com
+                executable: /Users/adityaiyer/Desktop/Projects/sae-monosemantic/.venv/bin/python
+                git:
+                    commit: ee7070c48b691093a0b1abece03cbb8b533c6660
+                    remote: https://github.com/adityaiyer7/sae-monosemantic.git
+                host: Adityas-MacBook-Pro.local
+                os: macOS-26.1-arm64-arm-64bit
+                program: /Users/adityaiyer/Desktop/Projects/sae-monosemantic/dummy.py
+                python: CPython 3.11.13
+                root: /Users/adityaiyer/Desktop/Projects/sae-monosemantic
+                startedAt: "2026-02-11T04:54:56.877078Z"
+                writerId: 5e5y0wqov7j5wiguag5jzurb5hfc6pz1
+        m: []
+        python_version: 3.11.13
+        t:
+            "3":
+                - 2
+                - 16
+            "4": 3.11.13
+            "5": 0.24.1
+            "12": 0.24.1
+            "13": darwin-arm64
+architecture:
+    value: CNN
+dataset:
+    value: CIFAR-100
+epochs:
+    value: 10
+learning_rate:
+    value: 0.02
