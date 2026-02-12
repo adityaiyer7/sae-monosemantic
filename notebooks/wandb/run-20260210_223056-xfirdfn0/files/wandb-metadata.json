@@ -1,0 +1,37 @@
+{
+  "os":  "macOS-26.1-arm64-arm-64bit",
+  "python":  "CPython 3.11.13",
+  "startedAt":  "2026-02-11T06:30:56.676092Z",
+  "program":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic/notebooks/sae_training.ipynb",
+  "codePath":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic/notebooks/sae_training.ipynb",
+  "codePathLocal":  "sae_training.ipynb",
+  "git":  {
+    "remote":  "https://github.com/adityaiyer7/sae-monosemantic.git",
+    "commit":  "49f744014f68c78d79e6b423f665e0a613c229dd"
+  },
+  "email":  "adityaiyer.m@gmail.com",
+  "root":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic/notebooks",
+  "host":  "Adityas-MacBook-Pro.local",
+  "executable":  "/Users/adityaiyer/Desktop/Projects/sae-monosemantic/.venv/bin/python",
+  "cpu_count":  8,
+  "cpu_count_logical":  8,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "653107871744"
+    }
+  },
+  "memory":  {
+    "total":  "8589934592"
+  },
+  "apple":  {
+    "name":  "Apple M3",
+    "ecpuCores":  4,
+    "pcpuCores":  4,
+    "gpuCores":  10,
+    "memoryGb":  8,
+    "swapTotalBytes":  "10737418240",
+    "ramTotalBytes":  "8589934592"
+  },
+  "writerId":  "lfn7zsjbl4u17hwmhc5o92zs8agmwu77"
+}
