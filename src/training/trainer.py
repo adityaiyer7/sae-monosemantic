@@ -5,6 +5,7 @@ from src.models.spare_autoencoder import SparseAutoEncoder
 from src.training.dataset_creator import ChunkIterableGenerator
 from src.training.losses import compute_loss
 from typing import Optional, Callable
+import torch.nn.functional as F
 
 
 class SAETrainer:
@@ -40,7 +41,20 @@ class SAETrainer:
 
                 self.optimizer.zero_grad()
                 loss.backward()
+
+                if not self.model.tie_weights:
+                    with torch.no_grad():
+                        W = self.model.W_dec
+                        W_norm = F.normalize(W, dim = 1)
+                        parallel = (self.model.W_dec.grad * W_norm).sum(dim = 1, keepdim = True) * W_norm
+                        self.model.W_dec.grad -= parallel
+            
+
                 self.optimizer.step()
+
+                if not self.model.tie_weights:
+                    with torch.no_grad():
+                        self.model.W_dec.data = F.normalize(self.model.W_dec.data, dim = 1)
 
                 if batch_idx % log_every == 0 or batch_idx == 0:
                     print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.6f}")

@@ -56,7 +56,7 @@ class SparseAutoEncoder(nn.Module):
             Encoded features of shape (..., d_hidden) with ReLU activation applied.
         """
         return torch.relu(
-            torch.matmul(x, self.W_enc) + self.b_enc
+            torch.matmul((x-self.b_dec), self.W_enc) + self.b_enc
         )
 
     def decode(self, f : torch.Tensor) -> torch.Tensor:
