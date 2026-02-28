@@ -36,3 +36,4 @@ I believe AI can help boost productivity, but the goal of this project is learni
 1. Generating docstrings and documentation.
 2. Writing Regex Patterns.
 3. Visualizations (loss curves, etc.)
+4. Logging metrics and weights to wandb. 
