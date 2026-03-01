@@ -22,8 +22,6 @@ venv/
 .ruff_cache/
 *.log
 
-# Model weights
-*.pth
 
 # Notebooks
 .ipynb_checkpoints/
