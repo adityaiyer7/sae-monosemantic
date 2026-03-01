@@ -7,14 +7,18 @@ from collections import defaultdict
 from typing import DefaultDict, Tuple, Optional
 from pathlib import Path
 from src.models.spare_autoencoder import SparseAutoEncoder
-
-
+from transformers import GPT2Tokenizer
+import json
 
 
 project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
 MODEL_SAVE_PATH = project_root / f'model_weights_4x.pth'
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
+
+# Structure: {feature_id: [(activation_value, token_text, token_id, context), ...]}
+feature_mapper = defaultdict(list)
+
 
 
 def natural_sort_key(path):
@@ -23,7 +27,7 @@ def natural_sort_key(path):
             for text in re.split(r'(\d+)', path)]
 
 
-files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:1]
+files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:2]
 
 
 state_dict = torch.load(MODEL_SAVE_PATH, weights_only=True, map_location = 'cpu')
@@ -33,6 +37,9 @@ model = SparseAutoEncoder(d_model=768, expansion_factor=4)
 model.load_state_dict(state_dict)
 model = model.to(device)
 model.eval()
+
+
+tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
 
 def get_active_features(x: torch.Tensor, threshold:float = 0.07)-> DefaultDict[int, float]:
@@ -52,6 +59,10 @@ def get_max_activating_features(feature_map:DefaultDict[int, float], top_k:Optio
         top_k = min(top_k, len(sorted_items))
         sorted_items = sorted_items[:top_k]
     return dict[int, float](sorted_items)
+
+def fill_feature_mapper(max_active_features, token_text, token_id, context="NA"):
+    for dimension_number, activation_value in max_active_features.items():
+        feature_mapper[dimension_number].append((activation_value, token_text, token_id))
 
 
 for chunk_file in files:
@@ -74,15 +85,20 @@ for chunk_file in files:
                     "token_ids": token_ids[i],
                     "activations": activations[i]
         }
-        print(sample["token_ids"])
-        print(sample["activations"].shape)
-
+        
         SAE_encoded_rep, results = model.forward(sample["activations"])
-        print("features", SAE_encoded_rep)
-        print("feature shape", SAE_encoded_rep.shape)
-        print("feature dim", SAE_encoded_rep.ndim)
+    
         active_feature_mapping = get_active_features(SAE_encoded_rep)
 
         max_active_features = get_max_activating_features(active_feature_mapping, top_k = 10)
-        print(max_active_features)
-        break
+        token_text = tokenizer.decode([sample["token_ids"].item()])
+
+        fill_feature_mapper(max_active_features, sample["token_ids"].item(), token_text)
+    
+    
+    
+
+
+feature_mapper = dict(sorted(feature_mapper.items(), key=lambda item: len(item[1]), reverse=True))
+with open("feature_mapper.json", "w", encoding="utf-8") as f:
+    json.dump(feature_mapper, f, ensure_ascii=False, indent=2)
