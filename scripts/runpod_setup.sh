@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPO_DIR="/sae-monosemantic"
+REPO_DIR="/workspace/sae-monosemantic"
 DATA_DIR="${REPO_DIR}/data"
 JUPYTER_PORT=8888
 

@@ -7,98 +7,184 @@ from collections import defaultdict
 from typing import DefaultDict, Tuple, Optional
 from pathlib import Path
 from src.models.spare_autoencoder import SparseAutoEncoder
+from src.training.dataset_creator import natural_sort_key
 from transformers import GPT2Tokenizer
 import json
+import pandas as pd
+import wandb
 
+class ScalableFeatureExtractor:
+    def __init__(self, model, device, expansion_factor: int, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07) -> None:
+        self.model = model
+        self.batch_size = batch_size
+        self.output_buffer_size = output_buffer_size
+        self.device = device
+        self.expansion_factor = expansion_factor
+        # Structure: {feature_id: [(activation_value, token_text, token_id, context), ...]}
+        self.feature_mapper = defaultdict(list)
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.threshold = threshold
 
-project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
-MODEL_SAVE_PATH = project_root / f'model_weights_4x.pth'
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
+        # Setup output directory for parquet files
+        self.output_dir = Path(f"features/features_{expansion_factor}x")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.chunk_counter = 0
+        
 
-# Structure: {feature_id: [(activation_value, token_text, token_id, context), ...]}
-feature_mapper = defaultdict(list)
+    
+    def get_active_features(self,x: torch.Tensor)-> DefaultDict[int, float]:
+        active_idx = (x > self.threshold).nonzero(as_tuple = True)[0]
+        return dict(zip(active_idx.tolist(), x[active_idx].tolist()))
 
+    
+    def get_max_activating_features(self,feature_map:DefaultDict[int, float], top_k:Optional[int], sort_order:str='descending')->dict[int, float]:
+        assert(sort_order == 'descending' or sort_order == 'ascending')
+        is_descending = (sort_order == 'descending')
+        sorted_items = sorted(feature_map.items(), key = lambda x:x[1], reverse = is_descending)
+        if top_k:
+            top_k = min(top_k, len(sorted_items))
+            sorted_items = sorted_items[:top_k]
+        return dict[int, float](sorted_items)
 
+    def fill_feature_mapper(self,max_active_features, token_text, token_id, context="NA"):
+        for dimension_number, activation_value in max_active_features.items():
+            self.feature_mapper[dimension_number].append((activation_value, token_text, token_id))
 
-def natural_sort_key(path):
-    """Extract numbers from filename for proper numeric sorting."""
-    return [int(text) if text.isdigit() else text.lower() 
-            for text in re.split(r'(\d+)', path)]
+    def save_chunk_to_parquet(self):
+        """Save current feature_mapper to parquet file and return the file path"""
+        records = []
+        for feature_id, activations in self.feature_mapper.items():
+            for activation_value, token_text, token_id in activations:
+                records.append({
+                    'feature_id': feature_id,
+                    'activation_value': activation_value,
+                    'token_text': token_text,
+                    'token_id': token_id,
+                    'chunk_id': self.chunk_counter
+                })
 
+        if records:  # Only save if we have data
+            # Convert feature records to DataFrame, save as Parquet file, clear memory, and return path for wandb upload
+            df = pd.DataFrame(records)
+            output_file = self.output_dir / f'chunk_{self.chunk_counter:04d}.parquet'
+            df.to_parquet(output_file, index=False)
+            print(f"Saved {len(records)} records to {output_file}")
 
-files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:2]
+            # Clear memory for next chunk
+            self.feature_mapper.clear()
+            self.chunk_counter += 1
+            return output_file
+        else:
+            self.chunk_counter += 1
+            return None
 
+    def process_chunk_batched(self, chunk_file):
+        print(f"Loading chunk file: {chunk_file}")
 
-state_dict = torch.load(MODEL_SAVE_PATH, weights_only=True, map_location = 'cpu')
+        chunk_data = torch.load(chunk_file, map_location='cpu')
+        token_ids = chunk_data["token_ids"]
+        activations = chunk_data["filtered_residual_activations"]
 
+        print("activations and token_ids extracted")
 
-model = SparseAutoEncoder(d_model=768, expansion_factor=4)
-model.load_state_dict(state_dict)
-model = model.to(device)
-model.eval()
-
-
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-
-
-def get_active_features(x: torch.Tensor, threshold:float = 0.07)-> DefaultDict[int, float]:
-    '''
-    x is going to be a two dimensional tensor
-    '''
-    assert x.ndim == 1
-    active_idx = (x > threshold).nonzero(as_tuple = True)[0]
-    return dict(zip(active_idx.tolist(), x[active_idx].tolist()))
-
-
-def get_max_activating_features(feature_map:DefaultDict[int, float], top_k:Optional[int], sort_order:str='descending')->dict[int, float]:
-    assert(sort_order == 'descending' or sort_order == 'ascending')
-    is_descending = (sort_order == 'descending')
-    sorted_items = sorted(feature_map.items(), key = lambda x:x[1], reverse = is_descending)
-    if top_k:
-        top_k = min(top_k, len(sorted_items))
-        sorted_items = sorted_items[:top_k]
-    return dict[int, float](sorted_items)
-
-def fill_feature_mapper(max_active_features, token_text, token_id, context="NA"):
-    for dimension_number, activation_value in max_active_features.items():
-        feature_mapper[dimension_number].append((activation_value, token_text, token_id))
-
-
-for chunk_file in files:
-    print(f"Loading chunk file: {chunk_file}")
-    chunk_data = torch.load(chunk_file, map_location=device)
-    token_ids = chunk_data["token_ids"]
-    activations = chunk_data["filtered_residual_activations"]
-
-    print("activations and token_ids extracted")
-
-    if token_ids.shape[0] != activations.shape[0]:
-        raise ValueError(
+        
+        if token_ids.shape[0] != activations.shape[0]:
+            raise ValueError(
             f"Mismatched lengths in {chunk_file}, "
             f"token_id shape = {token_ids.shape[0]} vs "
             f"activations shape = {activations.shape[0]}"
         )
-    
-    for i in range(token_ids.shape[0]):
-        sample = {
-                    "token_ids": token_ids[i],
-                    "activations": activations[i]
-        }
-        
-        SAE_encoded_rep, results = model.forward(sample["activations"])
-    
-        active_feature_mapping = get_active_features(SAE_encoded_rep)
+        num_samples = token_ids.shape[0]
 
-        max_active_features = get_max_activating_features(active_feature_mapping, top_k = 10)
-        token_text = tokenizer.decode([sample["token_ids"].item()])
+        for i in range(0, num_samples, self.batch_size):
+            token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
+            activations_batch = activations[i: i + self.batch_size].to(self.device)
 
-        fill_feature_mapper(max_active_features, sample["token_ids"].item(), token_text)
-    
-    
-    
+            with torch.no_grad():
+                SAE_encoded_rep, results = self.model.forward(activations_batch)
+            
+                SAE_encoded_cpu = SAE_encoded_rep.cpu()
+                token_ids_cpu = token_id_batch.cpu()
 
 
-feature_mapper = dict(sorted(feature_mapper.items(), key=lambda item: len(item[1]), reverse=True))
-with open("feature_mapper.json", "w", encoding="utf-8") as f:
-    json.dump(feature_mapper, f, ensure_ascii=False, indent=2)
+            for j in range(len(token_id_batch)):
+                active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
+                max_active_features = self.get_max_activating_features(active_feature_mapping, top_k = 10)
+
+                token_text = self.tokenizer.decode([token_ids_cpu[j].item()])
+                self.fill_feature_mapper(max_active_features, token_text, token_ids_cpu[j].item())
+            
+            del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
+            if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
+                # apparently empty cache is expensive, so reducing frequency to reduce overhead.
+                torch.cuda.empty_cache()
+
+        # Save chunk to parquet and return file path
+        return self.save_chunk_to_parquet()
+
+
+
+def main():
+    project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
+    expansion_factor = 4
+    MODEL_SAVE_PATH = project_root / f'model_weights_{expansion_factor}x.pth'
+    activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:2]
+
+    # Initialize wandb
+    batch_size = 32
+    wandb_config = {
+        "expansion_factor": expansion_factor,
+        "batch_size": batch_size,
+        "threshold": 0.07,
+        "top_k": 10,
+        "num_chunks": len(files)
+    }
+
+    run = wandb.init(
+        entity="adityaiyer-m-self",
+        project="sae-for-monosemanticity",
+        job_type="feature-extraction",
+        config=wandb_config,
+        name=f"feature-extraction-{expansion_factor}x"
+    )
+
+    state_dict = torch.load(MODEL_SAVE_PATH, weights_only=True, map_location = device)
+
+    model = SparseAutoEncoder(d_model=768, expansion_factor=expansion_factor)
+    model.load_state_dict(state_dict)
+    model = model.to(device)
+    model.eval()
+
+    feature_extractor = ScalableFeatureExtractor(
+        model = model,
+        device = device,
+        expansion_factor = expansion_factor,
+        batch_size = batch_size
+    )
+
+    # Process chunks and upload to wandb
+    for file in files:
+        parquet_file = feature_extractor.process_chunk_batched(file)
+
+        # Upload parquet file to wandb as artifact
+        if parquet_file:
+            artifact = wandb.Artifact(
+                name=f"feature-chunk-{expansion_factor}x",
+                type="feature-data",
+                description=f"Feature activations for {expansion_factor}x SAE model"
+            )
+            artifact.add_file(str(parquet_file))
+            run.log_artifact(artifact)
+            print(f"Uploaded {parquet_file.name} to wandb")
+
+    print(f"\nCompleted processing {len(files)} chunks.")
+    print(f"Parquet files saved to: {feature_extractor.output_dir}")
+
+    wandb.finish()
+
+
+if __name__ == "__main__":
+    main()
