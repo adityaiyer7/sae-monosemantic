@@ -131,7 +131,7 @@ def main():
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:2]
+    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
 
     # Initialize wandb
     batch_size = 32
