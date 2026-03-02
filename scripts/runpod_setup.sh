@@ -9,13 +9,23 @@ JUPYTER_PORT=8888
 echo "==> Installing system packages..."
 apt-get update -qq && apt-get install -y -qq rsync
 
-# ── Step 2: Install Python dependencies ───────────────────────────────
+# ── Step 2: Clone repo if not already present ─────────────────────────
+echo ""
+echo "==> Checking for repo..."
+if [ -d "$REPO_DIR" ]; then
+    echo "    Repo already present at ${REPO_DIR}. Skipping clone."
+else
+    echo "    Cloning repo into ${REPO_DIR}..."
+    git clone git@github.com:adityaiyer7/sae-monosemantic.git "$REPO_DIR"
+fi
+
+# ── Step 3: Install Python dependencies ───────────────────────────────
 echo ""
 echo "==> Installing uv and project dependencies..."
 pip install -q uv
 cd "$REPO_DIR" && uv pip install --system -e .
 
-# ── Step 3: Check for data, prompt for transfer if missing ────────────
+# ── Step 4: Check for data, prompt for transfer if missing ────────────
 echo ""
 echo "==> Checking for data..."
 if [ -d "$DATA_DIR" ] && [ "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
@@ -35,13 +45,13 @@ else
     read -rp "    Press Enter once the transfer is done..."
 fi
 
-# ── Step 4: Kill existing Jupyter servers ─────────────────────────────
+# ── Step 5: Kill existing Jupyter servers ─────────────────────────────
 echo ""
 echo "==> Killing existing Jupyter servers..."
 pkill -f jupyter 2>/dev/null || true
 sleep 2
 
-# ── Step 5: Start JupyterLab ─────────────────────────────────────────
+# ── Step 6: Start JupyterLab ─────────────────────────────────────────
 echo ""
 echo "==> Starting JupyterLab on port ${JUPYTER_PORT}..."
 cd "$REPO_DIR" && jupyter lab \
