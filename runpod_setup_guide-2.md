@@ -22,12 +22,14 @@ ssh root@<POD_IP> -p <PORT> -i ~/.ssh/id_ed25519
 
 ## 2. Add Pod SSH Key to GitHub
 
+> ✅ If you've already copied your SSH key to `/workspace/.ssh/` (one-time setup), skip this section — the setup script handles it automatically.
+
 The pod needs its own SSH key to clone private repos from GitHub.
 
-**Generate a key on the pod** (skip if already exists):
+**Generate a key on the pod:**
 
 ```bash
-ssh-keygen -t ed25519 -C "your_github_username"
+ssh-keygen -t ed25519 -C "adityaiyer7"
 ```
 
 **Print the public key:**
@@ -36,7 +38,7 @@ ssh-keygen -t ed25519 -C "your_github_username"
 cat ~/.ssh/id_ed25519.pub
 ```
 
-Copy the entire output (including the username at the end — that's normal), then go to:
+Copy the entire output, then go to:
 
 **GitHub → Settings → SSH and GPG Keys → New SSH Key**
 
@@ -50,17 +52,23 @@ ssh -T git@github.com
 
 You should see: `Hi <username>! You've successfully authenticated.`
 
-> ⚠️ The SSH key lives on the container disk, not `/workspace`, so you'll need to redo this step each time you spin up a new pod.
+**Persist the key to `/workspace` so you never need to do this again:**
+
+```bash
+mkdir -p /workspace/.ssh
+cp ~/.ssh/id_ed25519 /workspace/.ssh/
+cp ~/.ssh/id_ed25519.pub /workspace/.ssh/
+```
 
 ---
 
 ## 3. Clone Your Repo
 
+> On subsequent pods, skip this if the repo is already in `/workspace` from a previous session.
+
 ```bash
 git clone git@github.com:adityaiyer7/sae-monosemantic.git /workspace/sae-monosemantic
 ```
-
-> On subsequent pods, skip this if the repo is already in `/workspace` from a previous session.
 
 ---
 
@@ -93,6 +101,8 @@ apt-get update && apt-get install -y rsync
 ---
 
 ## 6. Transfer Data from Local Machine
+
+> ✅ If data is already in `/workspace/sae-monosemantic/data/`, skip this — it persists across sessions.
 
 Run this on your **local terminal** (not on the pod):
 
@@ -194,8 +204,8 @@ Note: `cd` in notebook cells doesn't persist between cells — use `cwd` in subp
 
 ## 11. Gotchas
 
-- **SSH keys don't persist.** The pod SSH key for GitHub lives on the container disk — you'll need to regenerate and re-add it to GitHub on each new pod.
-- **`/workspace` is persistent.** Your repo, data, and model weights in `/workspace` survive pod stops and restarts. Only the container disk (system packages, SSH keys, etc.) resets.
+- **SSH keys persist if copied to `/workspace/.ssh/`.** The setup script restores them automatically. If you haven't done this yet, see Step 2.
+- **`/workspace` is persistent.** Your repo, data, model weights, and SSH keys in `/workspace` survive pod stops and restarts. Only the container disk (system packages, etc.) resets.
 - **JupyterLab terminals can be buggy** on RunPod — blank terminal tabs are common. Use notebook cells with `!` prefix instead.
 - **Don't paste commands with smart quotes** on Mac — they can cause `dquote>` hanging prompts. If this happens, open a new terminal window.
 - **"Notebook is not trusted"** warning is harmless.
@@ -208,7 +218,7 @@ Note: `cd` in notebook cells doesn't persist between cells — use `cwd` in subp
 
 ## 12. One-Time Startup Script (Recommended)
 
-To avoid repeating steps 2 and 4-7 every time, save this as `setup.sh` in your repo:
+Save this as `setup.sh` in your repo. On any new pod, just run it — it handles SSH key restoration, repo clone, dependencies, data check, and JupyterLab.
 
 ```bash
 #!/bin/bash
@@ -222,7 +232,24 @@ JUPYTER_PORT=8888
 echo "==> Installing system packages..."
 apt-get update -qq && apt-get install -y -qq rsync
 
-# ── Step 2: Clone repo if not already present ─────────────────────────
+# ── Step 2: Restore GitHub SSH key from /workspace ────────────────────
+echo ""
+echo "==> Setting up GitHub SSH key..."
+if [ -f "/workspace/.ssh/id_ed25519" ]; then
+    mkdir -p ~/.ssh
+    ln -sf /workspace/.ssh/id_ed25519 ~/.ssh/id_ed25519
+    ln -sf /workspace/.ssh/id_ed25519.pub ~/.ssh/id_ed25519.pub
+    chmod 600 ~/.ssh/id_ed25519
+    echo "    SSH key restored from /workspace."
+else
+    echo "    No SSH key found in /workspace."
+    echo "    Generate one with: ssh-keygen -t ed25519 -C 'adityaiyer7'"
+    echo "    Then add the public key to GitHub and run:"
+    echo "    mkdir -p /workspace/.ssh && cp ~/.ssh/id_ed25519* /workspace/.ssh/"
+    read -rp "    Press Enter once done..."
+fi
+
+# ── Step 3: Clone repo if not already present ─────────────────────────
 echo ""
 echo "==> Checking for repo..."
 if [ -d "$REPO_DIR" ]; then
@@ -232,13 +259,13 @@ else
     git clone git@github.com:adityaiyer7/sae-monosemantic.git "$REPO_DIR"
 fi
 
-# ── Step 3: Install Python dependencies ───────────────────────────────
+# ── Step 4: Install Python dependencies ───────────────────────────────
 echo ""
 echo "==> Installing uv and project dependencies..."
 pip install -q uv
 cd "$REPO_DIR" && uv pip install --system -e .
 
-# ── Step 4: Check for data, prompt for transfer if missing ────────────
+# ── Step 5: Check for data, prompt for transfer if missing ────────────
 echo ""
 echo "==> Checking for data..."
 if [ -d "$DATA_DIR" ] && [ "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
@@ -258,13 +285,13 @@ else
     read -rp "    Press Enter once the transfer is done..."
 fi
 
-# ── Step 5: Kill existing Jupyter servers ─────────────────────────────
+# ── Step 6: Kill existing Jupyter servers ─────────────────────────────
 echo ""
 echo "==> Killing existing Jupyter servers..."
 pkill -f jupyter 2>/dev/null || true
 sleep 2
 
-# ── Step 6: Start JupyterLab ─────────────────────────────────────────
+# ── Step 7: Start JupyterLab ─────────────────────────────────────────
 echo ""
 echo "==> Starting JupyterLab on port ${JUPYTER_PORT}..."
 cd "$REPO_DIR" && jupyter lab \
@@ -279,15 +306,8 @@ cd "$REPO_DIR" && jupyter lab \
     --ServerApp.password=''
 ```
 
-On any new pod, after adding your SSH key to GitHub (step 2), just run:
+On any new pod, just run:
 
 ```bash
-bash /workspace/sae-monosemantic/setup.sh
-```
-
-Or if the repo isn't cloned yet, clone it first then run the script:
-
-```bash
-git clone git@github.com:adityaiyer7/sae-monosemantic.git /workspace/sae-monosemantic
 bash /workspace/sae-monosemantic/setup.sh
 ```

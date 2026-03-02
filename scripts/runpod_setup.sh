@@ -9,6 +9,25 @@ JUPYTER_PORT=8888
 echo "==> Installing system packages..."
 apt-get update -qq && apt-get install -y -qq rsync
 
+# ── Step 1.5: Persist GitHub SSH key ──────────────────────────────────
+echo ""
+echo "==> Setting up GitHub SSH key..."
+if [ -f "/workspace/.ssh/id_ed25519" ]; then
+    mkdir -p ~/.ssh
+    ln -sf /workspace/.ssh/id_ed25519 ~/.ssh/id_ed25519
+    ln -sf /workspace/.ssh/id_ed25519.pub ~/.ssh/id_ed25519.pub
+    chmod 600 ~/.ssh/id_ed25519
+    echo "    SSH key restored from /workspace."
+else
+    echo "    No SSH key found in /workspace."
+    echo "    Run: ssh-keygen -t ed25519 -C 'adityaiyer7' && cp ~/.ssh/id_ed25519* /workspace/.ssh/"
+    echo "    Then add the public key to GitHub. Only need to do this once."
+    read -rp "    Press Enter once done..."
+    mkdir -p /workspace/.ssh
+    cp ~/.ssh/id_ed25519 /workspace/.ssh/
+    cp ~/.ssh/id_ed25519.pub /workspace/.ssh/
+fi
+
 # ── Step 2: Clone repo if not already present ─────────────────────────
 echo ""
 echo "==> Checking for repo..."
