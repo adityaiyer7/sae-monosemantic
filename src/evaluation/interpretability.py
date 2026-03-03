@@ -46,20 +46,21 @@ class ScalableFeatureExtractor:
             sorted_items = sorted_items[:top_k]
         return dict[int, float](sorted_items)
 
-    def fill_feature_mapper(self,max_active_features, token_text, token_id, context="NA"):
+    def fill_feature_mapper(self,max_active_features, token_text, token_id, context):
         for dimension_number, activation_value in max_active_features.items():
-            self.feature_mapper[dimension_number].append((activation_value, token_text, token_id))
+            self.feature_mapper[dimension_number].append((activation_value, token_text, token_id, context))
 
     def save_chunk_to_parquet(self):
         """Save current feature_mapper to parquet file and return the file path"""
         records = []
         for feature_id, activations in self.feature_mapper.items():
-            for activation_value, token_text, token_id in activations:
+            for activation_value, token_text, token_id, context in activations:
                 records.append({
-                    'feature_id': feature_id,
+                    'feature_id': feature_id,  # feature_id is the SAE feature dimension index
                     'activation_value': activation_value,
                     'token_text': token_text,
                     'token_id': token_id,
+                    'context': context,
                     'chunk_id': self.chunk_counter
                 })
 
@@ -78,7 +79,7 @@ class ScalableFeatureExtractor:
             self.chunk_counter += 1
             return None
 
-    def process_chunk_batched(self, chunk_file):
+    def process_chunk_batched(self, chunk_file, context_window = 10):
         print(f"Loading chunk file: {chunk_file}")
 
         chunk_data = torch.load(chunk_file, map_location='cpu')
@@ -108,11 +109,19 @@ class ScalableFeatureExtractor:
 
 
             for j in range(len(token_id_batch)):
+            
+                start_idx = max(0, i + j - context_window)
+                end_idx = min(num_samples, i + j + context_window + 1)
+
+                context_token_ids = token_ids[start_idx:end_idx]
+                context_text = self.tokenizer.decode(context_token_ids.tolist())
+
                 active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
-                max_active_features = self.get_max_activating_features(active_feature_mapping, top_k = 10)
+                # Pass all active features (no top_k filtering)
+                all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
 
                 token_text = self.tokenizer.decode([token_ids_cpu[j].item()])
-                self.fill_feature_mapper(max_active_features, token_text, token_ids_cpu[j].item())
+                self.fill_feature_mapper(all_active_features, token_text, token_ids_cpu[j].item(), context = context_text)
             
             del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
             if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
@@ -140,7 +149,7 @@ def main():
         "expansion_factor": expansion_factor,
         "batch_size": batch_size,
         "threshold": 0.07,
-        "top_k": 10,
+        "top_k": None,  # Using all active features above threshold
         "num_chunks": len(files)
     }
 
