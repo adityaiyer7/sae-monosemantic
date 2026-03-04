@@ -135,7 +135,7 @@ class ScalableFeatureExtractor:
 
             context_start_idx = context_window
             context_end_index = context_window + 1
-            offsets = torch.arange(context_start_idx, context_end_index)
+            offsets = torch.arange(context_start_idx, context_end_index, device=token_id_batch.device)
 
             context_token_ids = token_id_batch.unsqueeze(1) + offsets
 
