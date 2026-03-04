@@ -84,6 +84,8 @@ class ScalableFeatureExtractor:
 
         chunk_data = torch.load(chunk_file, map_location='cpu')
         token_ids = chunk_data["token_ids"]
+        all_token_texts = self.tokenizer.batch_decode([[tid] for tid in token_ids.tolist()])
+
         activations = chunk_data["filtered_residual_activations"]
 
         print("activations and token_ids extracted")
@@ -107,21 +109,23 @@ class ScalableFeatureExtractor:
                 SAE_encoded_cpu = SAE_encoded_rep.cpu()
                 token_ids_cpu = token_id_batch.cpu()
 
-
+            context_token_ids_list = []
             for j in range(len(token_id_batch)):
-            
                 start_idx = max(0, i + j - context_window)
                 end_idx = min(num_samples, i + j + context_window + 1)
-
                 context_token_ids = token_ids[start_idx:end_idx]
-                context_text = self.tokenizer.decode(context_token_ids.tolist())
+                context_token_ids_list.append(context_token_ids.tolist())
+                
+            context_texts = self.tokenizer.batch_decode(context_token_ids_list)
 
+
+            for j in range(len(token_id_batch)):
                 active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
                 # Pass all active features (no top_k filtering)
                 all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
 
-                token_text = self.tokenizer.decode([token_ids_cpu[j].item()])
-                self.fill_feature_mapper(all_active_features, token_text, token_ids_cpu[j].item(), context = context_text)
+                token_text = all_token_texts[i + j]
+                self.fill_feature_mapper(all_active_features, token_text, token_ids_cpu[j].item(), context = context_text[j])
             
             del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
             if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
@@ -144,7 +148,7 @@ def main():
     files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
 
     # Initialize wandb
-    batch_size = 32
+    batch_size = 2048
     wandb_config = {
         "expansion_factor": expansion_factor,
         "batch_size": batch_size,
