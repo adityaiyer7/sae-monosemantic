@@ -78,16 +78,71 @@ class ScalableFeatureExtractor:
             self.chunk_counter += 1
             return None
 
+    # def process_chunk_batched(self, chunk_file, context_window = 10):
+    #     print(f"Loading chunk file: {chunk_file}")
+
+    #     chunk_data = torch.load(chunk_file, map_location='cpu')
+    #     token_ids = chunk_data["token_ids"]
+
+    #     activations = chunk_data["filtered_residual_activations"]
+
+    #     print("activations and token_ids extracted")
+
+        
+    #     if token_ids.shape[0] != activations.shape[0]:
+    #         raise ValueError(
+    #         f"Mismatched lengths in {chunk_file}, "
+    #         f"token_id shape = {token_ids.shape[0]} vs "
+    #         f"activations shape = {activations.shape[0]}"
+    #     )
+
+    #     num_samples = token_ids.shape[0]
+
+
+    #     for i in range(0, num_samples, self.batch_size):
+    #         token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
+    #         activations_batch = activations[i: i + self.batch_size].to(self.device)
+
+    #         with torch.no_grad():
+    #             SAE_encoded_rep, results = self.model.forward(activations_batch)
+            
+    #             SAE_encoded_cpu = SAE_encoded_rep.cpu()
+    #             token_ids_cpu = token_id_batch.cpu()
+
+            
+
+
+    #         for j in range(len(token_id_batch)):
+    #             start_idx = max(0, i + j - context_window)
+    #             end_idx = min(num_samples, i + j + context_window + 1)
+    #             context_token_ids = token_ids[start_idx:end_idx].tolist()
+                
+    #             active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
+    #             # Pass all active features (no top_k filtering)
+    #             all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
+
+    #             self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids = context_token_ids)
+            
+    #         del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
+    #         if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
+    #             # apparently empty cache is expensive, so reducing frequency to reduce overhead.
+    #             torch.cuda.empty_cache()
+
+    #     # Save chunk to parquet and return file path
+    #     return self.save_chunk_to_parquet()
     def process_chunk_batched(self, chunk_file, context_window = 10):
+        import time
         print(f"Loading chunk file: {chunk_file}")
-
+    
+        t_load = time.time()
         chunk_data = torch.load(chunk_file, map_location='cpu')
+        print(f"  torch.load took: {time.time() - t_load:.2f}s")
+        
         token_ids = chunk_data["token_ids"]
-
         activations = chunk_data["filtered_residual_activations"]
-
+    
         print("activations and token_ids extracted")
-
+    
         
         if token_ids.shape[0] != activations.shape[0]:
             raise ValueError(
@@ -95,41 +150,54 @@ class ScalableFeatureExtractor:
             f"token_id shape = {token_ids.shape[0]} vs "
             f"activations shape = {activations.shape[0]}"
         )
-
+    
         num_samples = token_ids.shape[0]
-
-
+        print(f"Processing {num_samples} samples in batches of {self.batch_size}")
+    
+    
         for i in range(0, num_samples, self.batch_size):
+            t_batch_start = time.time()
+            
             token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
             activations_batch = activations[i: i + self.batch_size].to(self.device)
-
+    
+            t_gpu_start = time.time()
             with torch.no_grad():
                 SAE_encoded_rep, results = self.model.forward(activations_batch)
             
                 SAE_encoded_cpu = SAE_encoded_rep.cpu()
                 token_ids_cpu = token_id_batch.cpu()
-
+    
+            t_loop_start = time.time()
+            gpu_time = t_loop_start - t_gpu_start
             
-
-
             for j in range(len(token_id_batch)):
                 start_idx = max(0, i + j - context_window)
                 end_idx = min(num_samples, i + j + context_window + 1)
                 context_token_ids = token_ids[start_idx:end_idx].tolist()
                 
                 active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
-                # Pass all active features (no top_k filtering)
                 all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
-
-                self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids = context_token_ids)
+    
+                self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids)
+            
+            loop_time = time.time() - t_loop_start
+            total_time = time.time() - t_batch_start
+            
+            if i % (5 * self.batch_size) == 0:  # Print every 5 batches
+                print(f"  Batch {i}/{num_samples}: GPU={gpu_time:.3f}s, Loop={loop_time:.3f}s, Total={total_time:.3f}s")
             
             del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
-            if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
-                # apparently empty cache is expensive, so reducing frequency to reduce overhead.
+            if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:
                 torch.cuda.empty_cache()
-
+    
         # Save chunk to parquet and return file path
-        return self.save_chunk_to_parquet()
+        print("Saving to parquet...")
+        t_save = time.time()
+        result = self.save_chunk_to_parquet()
+        print(f"  Parquet save took: {time.time() - t_save:.2f}s")
+        return result
+
 
 
 
