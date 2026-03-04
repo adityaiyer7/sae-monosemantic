@@ -125,7 +125,7 @@ class ScalableFeatureExtractor:
                 all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
 
                 token_text = all_token_texts[i + j]
-                self.fill_feature_mapper(all_active_features, token_text, token_ids_cpu[j].item(), context = context_text[j])
+                self.fill_feature_mapper(all_active_features, token_text, token_ids_cpu[j].item(), context = context_texts[j])
             
             del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
             if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
