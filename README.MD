@@ -38,3 +38,4 @@ I believe AI can help boost productivity, but the goal of this project is learni
 3. Visualizations (loss curves, etc.)
 4. Logging, creating output files, and logging metrics, metadata, artifacts to wandb.
 5. Creating the runpod_setup.sh script.
+6. Time Tracking. 

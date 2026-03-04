@@ -11,6 +11,8 @@ from src.training.dataset_creator import natural_sort_key
 from transformers import GPT2Tokenizer
 import json
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import wandb
 
 class ScalableFeatureExtractor:
@@ -31,46 +33,57 @@ class ScalableFeatureExtractor:
         
 
     
-    def get_active_features(self,x: torch.Tensor)-> DefaultDict[int, float]:
-        active_idx = (x > self.threshold).nonzero(as_tuple = True)[0]
-        return dict(zip(active_idx.tolist(), x[active_idx].tolist()))
+    def get_active_features(self,x: torch.Tensor)-> list[DefaultDict[int, float]]:
+        batch_index, active_index = (x > self.threshold).nonzero(as_tuple=True)
+        result = [{} for _ in range(x.shape[0])]
+        for batch, feature, value in zip(batch_index.tolist(), active_index.tolist(), x[batch_index, active_index].tolist()):
+            result[batch][feature] = value
+        return result
 
     
-    def get_max_activating_features(self,feature_map:DefaultDict[int, float], top_k:Optional[int], sort_order:str='descending')->dict[int, float]:
-        assert(sort_order == 'descending' or sort_order == 'ascending')
-        is_descending = (sort_order == 'descending')
-        sorted_items = sorted(feature_map.items(), key = lambda x:x[1], reverse = is_descending)
-        if top_k:
-            top_k = min(top_k, len(sorted_items))
-            sorted_items = sorted_items[:top_k]
-        return dict[int, float](sorted_items)
+    def get_max_activating_features(self,active_features:list[DefaultDict[int, float]], top_k:Optional[int], sort_order:str='descending')->list[DefaultDict[int, float]]:
+        if not top_k:
+            return active_features
+        res = []
+        for j in range(len(active_features)):
+            feature_map = active_features[j]
+            assert(sort_order == 'descending' or sort_order == 'ascending')
+            is_descending = (sort_order == 'descending')
+            sorted_items = sorted(feature_map.items(), key = lambda x:x[1], reverse = is_descending)
+            k = min(top_k, len(sorted_items))
+            sorted_items = sorted_items[:k]
+            res.append(dict(sorted_items))
+        return res
 
     def fill_feature_mapper(self, max_active_features, token_id, context_token_ids):
-        for dimension_number, activation_value in max_active_features.items():
-            self.feature_mapper[dimension_number].append((activation_value, token_id, context_token_ids))
+        for j in range(len(max_active_features)):
+            for dimension_number, activation_value in max_active_features[j].items():
+                self.feature_mapper[dimension_number].append((activation_value, token_id[j].item(), context_token_ids[j]))
 
 
     def save_chunk_to_parquet(self):
         """Save current feature_mapper to parquet file and return the file path"""
-        records = []
+        feature_ids, activation_values, token_ids, context_token_ids_list = [], [], [], []
+
         for feature_id, activations in self.feature_mapper.items():
             for activation_value, token_id, context_token_ids in activations:
-                records.append({
-                    'feature_id': feature_id,  # feature_id is the SAE feature dimension index
-                    'activation_value': activation_value,
-                    'token_id': token_id,
-                    'context_token_ids': context_token_ids,
-                    'chunk_id': self.chunk_counter
-                })
+                feature_ids.append(feature_id)
+                activation_values.append(activation_value)
+                token_ids.append(token_id)
+                context_token_ids_list.append(context_token_ids.tolist())
 
-        if records:  # Only save if we have data
-            # Convert feature records to DataFrame, save as Parquet file, clear memory, and return path for wandb upload
-            df = pd.DataFrame(records)
+        if feature_ids:
+            table = pa.table({
+                'feature_id': pa.array(feature_ids, type=pa.int32()),
+                'activation_value': pa.array(activation_values, type=pa.float32()),
+                'token_id': pa.array(token_ids, type=pa.int32()),
+                'context_token_ids': pa.array(context_token_ids_list, type=pa.list_(pa.int32())),
+                'chunk_id': pa.array([self.chunk_counter] * len(feature_ids), type=pa.int32()),
+            })
             output_file = self.output_dir / f'chunk_{self.chunk_counter:04d}.parquet'
-            df.to_parquet(output_file, index=False)
-            print(f"Saved {len(records)} records to {output_file}")
+            pq.write_table(table, output_file)
+            print(f"Saved {len(feature_ids)} records to {output_file}")
 
-            # Clear memory for next chunk
             self.feature_mapper.clear()
             self.chunk_counter += 1
             return output_file
@@ -78,58 +91,7 @@ class ScalableFeatureExtractor:
             self.chunk_counter += 1
             return None
 
-    # def process_chunk_batched(self, chunk_file, context_window = 10):
-    #     print(f"Loading chunk file: {chunk_file}")
-
-    #     chunk_data = torch.load(chunk_file, map_location='cpu')
-    #     token_ids = chunk_data["token_ids"]
-
-    #     activations = chunk_data["filtered_residual_activations"]
-
-    #     print("activations and token_ids extracted")
-
-        
-    #     if token_ids.shape[0] != activations.shape[0]:
-    #         raise ValueError(
-    #         f"Mismatched lengths in {chunk_file}, "
-    #         f"token_id shape = {token_ids.shape[0]} vs "
-    #         f"activations shape = {activations.shape[0]}"
-    #     )
-
-    #     num_samples = token_ids.shape[0]
-
-
-    #     for i in range(0, num_samples, self.batch_size):
-    #         token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
-    #         activations_batch = activations[i: i + self.batch_size].to(self.device)
-
-    #         with torch.no_grad():
-    #             SAE_encoded_rep, results = self.model.forward(activations_batch)
-            
-    #             SAE_encoded_cpu = SAE_encoded_rep.cpu()
-    #             token_ids_cpu = token_id_batch.cpu()
-
-            
-
-
-    #         for j in range(len(token_id_batch)):
-    #             start_idx = max(0, i + j - context_window)
-    #             end_idx = min(num_samples, i + j + context_window + 1)
-    #             context_token_ids = token_ids[start_idx:end_idx].tolist()
-                
-    #             active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
-    #             # Pass all active features (no top_k filtering)
-    #             all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
-
-    #             self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids = context_token_ids)
-            
-    #         del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
-    #         if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
-    #             # apparently empty cache is expensive, so reducing frequency to reduce overhead.
-    #             torch.cuda.empty_cache()
-
-    #     # Save chunk to parquet and return file path
-    #     return self.save_chunk_to_parquet()
+   
     def process_chunk_batched(self, chunk_file, context_window = 10):
         import time
         print(f"Loading chunk file: {chunk_file}")
@@ -170,16 +132,27 @@ class ScalableFeatureExtractor:
     
             t_loop_start = time.time()
             gpu_time = t_loop_start - t_gpu_start
-            
-            for j in range(len(token_id_batch)):
-                start_idx = max(0, i + j - context_window)
-                end_idx = min(num_samples, i + j + context_window + 1)
-                context_token_ids = token_ids[start_idx:end_idx].tolist()
+
+            context_start_idx = context_window
+            context_end_index = context_window + 1
+            offsets = torch.arange(context_start_idx, context_end_index)
+
+            context_token_ids = token_id_batch.unsqueeze(1) + offsets
+
+            active_feature_mapping = self.get_active_features(SAE_encoded_cpu)
+            all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
+
+            self.fill_feature_mapper(all_active_features, token_ids_cpu, context_token_ids)
+  
+            # for j in range(len(token_id_batch)):
+            #     start_idx = max(0, i + j - context_window)
+            #     end_idx = min(num_samples, i + j + context_window + 1)
+            #     context_token_ids = token_ids[start_idx:end_idx].tolist()
                 
-                active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
-                all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
+            #     active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
+            #     all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
     
-                self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids)
+            #     self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids)
             
             loop_time = time.time() - t_loop_start
             total_time = time.time() - t_batch_start

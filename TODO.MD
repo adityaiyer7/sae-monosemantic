@@ -29,6 +29,9 @@
 ### P3 — Context window: document boundary leakage
 - [ ] **Fix context window crossing document boundaries:** In `extract_activations.py`, tokens from multiple documents are concatenated into a flat array with no boundary markers. The ±10 token context window in `interpretability.py` (`process_chunk_batched`, lines 113–117) slides over this flat array, so tokens near document boundaries can display context mixing two unrelated documents. Low impact for now (activations are correct; boundary tokens are a small fraction of OpenWebText data), but when needed: store sequence lengths or boundary indices alongside `token_ids` when saving chunks, then clamp the context window to stay within the same document.
 
+### P3 — `get_max_activating_features` efficiency
+- [ ] **Use `heapq.nlargest`/`nsmallest` instead of full sort:** current implementation does O(n log n) sort per sample; switching to `heapq.nlargest` would give O(n log k), better when `top_k << active features`. Low priority since features are sparse post-threshold so `n` is already small.
+
 ### P3 — Lightweight interpretability checks (cheap, high signal)
 - [ ] **Top-K contexts per feature report:** maintain rolling top-K activations with text snippets for each feature; regenerate at checkpoints.
 - [ ] **Ablation sanity checks (activation space):** set selected feature activations to zero and measure:
