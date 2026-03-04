@@ -20,7 +20,6 @@ class ScalableFeatureExtractor:
         self.output_buffer_size = output_buffer_size
         self.device = device
         self.expansion_factor = expansion_factor
-        # Structure: {feature_id: [(activation_value, token_text, token_id, context), ...]}
         self.feature_mapper = defaultdict(list)
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.threshold = threshold
@@ -46,20 +45,19 @@ class ScalableFeatureExtractor:
             sorted_items = sorted_items[:top_k]
         return dict[int, float](sorted_items)
 
-    def fill_feature_mapper(self, max_active_features, token_text, token_id, context_token_ids):
+    def fill_feature_mapper(self, max_active_features, token_id, context_token_ids):
         for dimension_number, activation_value in max_active_features.items():
-            self.feature_mapper[dimension_number].append((activation_value, token_text, token_id, context_token_ids))
+            self.feature_mapper[dimension_number].append((activation_value, token_id, context_token_ids))
 
 
     def save_chunk_to_parquet(self):
         """Save current feature_mapper to parquet file and return the file path"""
         records = []
         for feature_id, activations in self.feature_mapper.items():
-            for activation_value, token_text, token_id, context_token_ids in activations:
+            for activation_value, token_id, context_token_ids in activations:
                 records.append({
                     'feature_id': feature_id,  # feature_id is the SAE feature dimension index
                     'activation_value': activation_value,
-                    'token_text': token_text,
                     'token_id': token_id,
                     'context_token_ids': context_token_ids,
                     'chunk_id': self.chunk_counter
@@ -85,7 +83,6 @@ class ScalableFeatureExtractor:
 
         chunk_data = torch.load(chunk_file, map_location='cpu')
         token_ids = chunk_data["token_ids"]
-        all_token_texts = self.tokenizer.batch_decode([[tid] for tid in token_ids.tolist()])
 
         activations = chunk_data["filtered_residual_activations"]
 
@@ -124,8 +121,7 @@ class ScalableFeatureExtractor:
                 # Pass all active features (no top_k filtering)
                 all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
 
-                token_text = all_token_texts[i + j]
-                self.fill_feature_mapper(all_active_features, token_text, token_ids_cpu[j].item(), context_token_ids = context_token_ids)
+                self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids = context_token_ids)
             
             del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
             if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:  # Every 10 batches
