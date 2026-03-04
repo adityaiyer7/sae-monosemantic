@@ -26,6 +26,9 @@
 - [ ] **Use reduced precision storage:** store activations in fp16/bf16 to fit more data; keep losses/accumulators in fp32.
 - [ ] **Prefer step-based training over epoch-based:** optimize for many update steps on a large cache rather than many epochs on a small cache.
 
+### P3 — Context window: document boundary leakage
+- [ ] **Fix context window crossing document boundaries:** In `extract_activations.py`, tokens from multiple documents are concatenated into a flat array with no boundary markers. The ±10 token context window in `interpretability.py` (`process_chunk_batched`, lines 113–117) slides over this flat array, so tokens near document boundaries can display context mixing two unrelated documents. Low impact for now (activations are correct; boundary tokens are a small fraction of OpenWebText data), but when needed: store sequence lengths or boundary indices alongside `token_ids` when saving chunks, then clamp the context window to stay within the same document.
+
 ### P3 — Lightweight interpretability checks (cheap, high signal)
 - [ ] **Top-K contexts per feature report:** maintain rolling top-K activations with text snippets for each feature; regenerate at checkpoints.
 - [ ] **Ablation sanity checks (activation space):** set selected feature activations to zero and measure:
