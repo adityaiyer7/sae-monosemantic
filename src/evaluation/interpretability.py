@@ -219,6 +219,10 @@ def main():
 
     # Process chunks and upload to wandb
     for chunk_idx, file in enumerate(files):
+        expected_parquet = feature_extractor.output_dir / f'chunk_{chunk_idx:04d}.parquet'
+        if expected_parquet.exists():
+            print(f"Skipping chunk {chunk_idx} — {expected_parquet.name} already exists")
+            continue
         parquet_file = feature_extractor.process_chunk_batched(file, chunk_idx)
 
         # Upload parquet file to wandb as artifact
