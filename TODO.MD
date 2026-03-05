@@ -40,6 +40,9 @@
 - [ ] **Pinning sanity checks (activation space):** clamp selected features on and verify reconstruction shifts consistently along that feature’s decoder direction.
 - [ ] **Monosemanticity heuristics:** cluster/keyword-score top-K contexts per feature to estimate “topic purity” and feature drift.
 
+### P4 — Repo hygiene
+- [ ] **Purge wandb artifacts from git history:** use `git filter-repo --path wandb/ --path notebooks/wandb/ --invert-paths` then force-push. All collaborators will need to re-clone afterward.
+
 ### P4 — Practical solo-research hygiene
 - [ ] **Reproducible run config:** seeds, cache version/hash, SAE hyperparams, loss scaling, normalization schedule, resampling frequency.
 - [ ] **Checkpoint interpretability artifacts:** save alongside weights:
