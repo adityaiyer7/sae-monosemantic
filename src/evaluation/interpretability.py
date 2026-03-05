@@ -176,8 +176,8 @@ class ScalableFeatureExtractor:
 
 
 def main():
-    project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
-    # project_root = Path("/workspace/sae-monosemantic")
+    # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
+    project_root = Path("/workspace/sae-monosemantic")
     expansion_factor = 4
     MODEL_SAVE_PATH = project_root / f'model_weights_{expansion_factor}x.pth'
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
