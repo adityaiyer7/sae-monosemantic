@@ -55,7 +55,7 @@ class ScalableFeatureExtractor:
             res.append(dict(sorted_items))
         return res
 
-    def fill_feature_mapper(self, max_active_features, token_id, context_token_ids):
+    def fill_feature_mapper(self, max_active_features: list[dict[int, float]], token_id: torch.Tensor, context_token_ids: torch.Tensor) -> int:
         context_token_ids_cpu = context_token_ids.cpu().tolist()
         length_counter = 0
         for j in range(len(max_active_features)):
