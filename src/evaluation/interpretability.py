@@ -56,13 +56,17 @@ class ScalableFeatureExtractor:
         return res
 
     def fill_feature_mapper(self, max_active_features, token_id, context_token_ids):
+        context_token_ids_cpu = context_token_ids.cpu().tolist()
+        length_counter = 0
         for j in range(len(max_active_features)):
             for dimension_number, activation_value in max_active_features[j].items():
-                self.feature_mapper[dimension_number].append((activation_value, token_id[j].item(), context_token_ids[j]))
+                self.feature_mapper[dimension_number].append((activation_value, token_id[j].item(), context_token_ids_cpu[j]))
+                # this tells us how many records are being stored in the dictionary (how many activation values across dimensions)
+                length_counter += 1
+        return length_counter
 
-
-    def save_chunk_to_parquet(self):
-        """Save current feature_mapper to parquet file and return the file path"""
+    def flush_to_parquet(self, writer: pq.ParquetWriter, chunk_idx: int):
+        """Flush current feature_mapper as a row group into the open ParquetWriter."""
         feature_ids, activation_values, token_ids, context_token_ids_list = [], [], [], []
 
         for feature_id, activations in self.feature_mapper.items():
@@ -70,7 +74,7 @@ class ScalableFeatureExtractor:
                 feature_ids.append(feature_id)
                 activation_values.append(activation_value)
                 token_ids.append(token_id)
-                context_token_ids_list.append(context_token_ids.tolist())
+                context_token_ids_list.append(context_token_ids)
 
         if feature_ids:
             table = pa.table({
@@ -78,111 +82,108 @@ class ScalableFeatureExtractor:
                 'activation_value': pa.array(activation_values, type=pa.float32()),
                 'token_id': pa.array(token_ids, type=pa.int32()),
                 'context_token_ids': pa.array(context_token_ids_list, type=pa.list_(pa.int32())),
-                'chunk_id': pa.array([self.chunk_counter] * len(feature_ids), type=pa.int32()),
+                'chunk_id': pa.array([chunk_idx] * len(feature_ids), type=pa.int32()),
             })
-            output_file = self.output_dir / f'chunk_{self.chunk_counter:04d}.parquet'
-            pq.write_table(table, output_file)
-            print(f"Saved {len(feature_ids)} records to {output_file}")
-
+            writer.write_table(table)
+            print(f"  Flushed {len(feature_ids)} records")
             self.feature_mapper.clear()
-            self.chunk_counter += 1
-            return output_file
-        else:
-            self.chunk_counter += 1
-            return None
 
    
-    def process_chunk_batched(self, chunk_file, context_window = 10):
+    def process_chunk_batched(self, chunk_file, chunk_idx: int, context_window = 10):
         import time
         print(f"Loading chunk file: {chunk_file}")
-    
+
         t_load = time.time()
         chunk_data = torch.load(chunk_file, map_location='cpu')
         print(f"  torch.load took: {time.time() - t_load:.2f}s")
-        
+
         token_ids = chunk_data["token_ids"]
         activations = chunk_data["filtered_residual_activations"]
-    
+
         print("activations and token_ids extracted")
-    
-        
+
         if token_ids.shape[0] != activations.shape[0]:
             raise ValueError(
             f"Mismatched lengths in {chunk_file}, "
             f"token_id shape = {token_ids.shape[0]} vs "
             f"activations shape = {activations.shape[0]}"
         )
-    
+
         num_samples = token_ids.shape[0]
         print(f"Processing {num_samples} samples in batches of {self.batch_size}")
-    
-    
-        for i in range(0, num_samples, self.batch_size):
-            t_batch_start = time.time()
-            
-            token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
-            activations_batch = activations[i: i + self.batch_size].to(self.device)
-    
-            t_gpu_start = time.time()
-            with torch.no_grad():
-                SAE_encoded_rep, results = self.model.forward(activations_batch)
-            
-                SAE_encoded_cpu = SAE_encoded_rep.cpu()
-                token_ids_cpu = token_id_batch.cpu()
-    
-            t_loop_start = time.time()
-            gpu_time = t_loop_start - t_gpu_start
 
-            context_start_idx = context_window
-            context_end_index = context_window + 1
-            offsets = torch.arange(context_start_idx, context_end_index, device=token_id_batch.device)
+        schema = pa.schema([
+            ('feature_id', pa.int32()),
+            ('activation_value', pa.float32()),
+            ('token_id', pa.int32()),
+            ('context_token_ids', pa.list_(pa.int32())),
+            ('chunk_id', pa.int32()),
+        ])
+        output_file = self.output_dir / f'chunk_{chunk_idx:04d}.parquet'
+        total_records = 0
 
-            context_token_ids = token_id_batch.unsqueeze(1) + offsets
+        with pq.ParquetWriter(output_file, schema) as writer:
+            for i in range(0, num_samples, self.batch_size):
+                t_batch_start = time.time()
 
-            active_feature_mapping = self.get_active_features(SAE_encoded_cpu)
-            all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
+                token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
+                activations_batch = activations[i: i + self.batch_size].to(self.device)
 
-            self.fill_feature_mapper(all_active_features, token_ids_cpu, context_token_ids)
-  
-            # for j in range(len(token_id_batch)):
-            #     start_idx = max(0, i + j - context_window)
-            #     end_idx = min(num_samples, i + j + context_window + 1)
-            #     context_token_ids = token_ids[start_idx:end_idx].tolist()
-                
-            #     active_feature_mapping = self.get_active_features(SAE_encoded_cpu[j])
-            #     all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
-    
-            #     self.fill_feature_mapper(all_active_features, token_ids_cpu[j].item(), context_token_ids)
-            
-            loop_time = time.time() - t_loop_start
-            total_time = time.time() - t_batch_start
-            
-            if i % (5 * self.batch_size) == 0:  # Print every 5 batches
-                print(f"  Batch {i}/{num_samples}: GPU={gpu_time:.3f}s, Loop={loop_time:.3f}s, Total={total_time:.3f}s")
-            
-            del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu
-            if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:
-                torch.cuda.empty_cache()
-    
-        # Save chunk to parquet and return file path
-        print("Saving to parquet...")
-        t_save = time.time()
-        result = self.save_chunk_to_parquet()
-        print(f"  Parquet save took: {time.time() - t_save:.2f}s")
-        return result
+                t_gpu_start = time.time()
+                with torch.no_grad():
+                    SAE_encoded_rep, results = self.model.forward(activations_batch)
+
+                    SAE_encoded_cpu = SAE_encoded_rep.cpu()
+                    token_ids_cpu = token_id_batch.cpu()
+
+                t_loop_start = time.time()
+                gpu_time = t_loop_start - t_gpu_start
+
+                context_start_idx = -context_window
+                context_end_index = context_window + 1
+                offsets = torch.arange(context_start_idx, context_end_index, device=token_id_batch.device)
+
+                context_token_ids = token_id_batch.unsqueeze(1) + offsets
+
+                active_feature_mapping = self.get_active_features(SAE_encoded_cpu)
+                all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
+
+                length_counter = self.fill_feature_mapper(all_active_features, token_ids_cpu, context_token_ids)
+                if length_counter > self.output_buffer_size:
+                    self.flush_to_parquet(writer, chunk_idx)
+                    total_records += length_counter
+
+                loop_time = time.time() - t_loop_start
+                total_time = time.time() - t_batch_start
+
+                if i % (5 * self.batch_size) == 0:  # Print every 5 batches
+                    print(f"  Batch {i}/{num_samples}: GPU={gpu_time:.3f}s, Loop={loop_time:.3f}s, Total={total_time:.3f}s")
+
+                del SAE_encoded_rep, SAE_encoded_cpu, activations_batch, token_id_batch, token_ids_cpu, context_token_ids
+                if torch.cuda.is_available() and i % (10 * self.batch_size) == 0:
+                    torch.cuda.empty_cache()
+
+            # Final flush for any remaining records
+            print("Flushing remaining records to parquet...")
+            t_save = time.time()
+            self.flush_to_parquet(writer, chunk_idx)
+            print(f"  Final flush took: {time.time() - t_save:.2f}s")
+
+        print(f"Saved {output_file}")
+        return output_file
 
 
 
 
 def main():
-    # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
-    project_root = Path("/workspace/sae-monosemantic")
+    project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
+    # project_root = Path("/workspace/sae-monosemantic")
     expansion_factor = 4
     MODEL_SAVE_PATH = project_root / f'model_weights_{expansion_factor}x.pth'
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
+    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:1]
 
     # Initialize wandb
     batch_size = 2048
@@ -217,8 +218,8 @@ def main():
     )
 
     # Process chunks and upload to wandb
-    for file in files:
-        parquet_file = feature_extractor.process_chunk_batched(file)
+    for chunk_idx, file in enumerate(files):
+        parquet_file = feature_extractor.process_chunk_batched(file, chunk_idx)
 
         # Upload parquet file to wandb as artifact
         if parquet_file:

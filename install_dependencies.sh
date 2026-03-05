@@ -17,27 +17,11 @@ cd /workspace/sae-monosemantic && uv pip install --system -e .
 echo "Installing rsync..."
 apt-get update && apt-get install -y rsync
 
-# 4. Install Homebrew
-echo "Installing Homebrew..."
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# 5. Configure Homebrew in bashrc
-echo "Configuring Homebrew in bashrc..."
-echo >> /root/.bashrc
-echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"' >> /root/.bashrc
-
-# 6. Load Homebrew in current session
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
-
-# 7. Verify brew installation
-echo "Verifying Homebrew installation..."
-brew --version
-
-# 8. Install git-lfs
+# 4. Install git-lfs
 echo "Installing git-lfs..."
-brew install git-lfs
+apt-get install -y git-lfs
 
-# 9. Initialize git-lfs
+# 5. Initialize git-lfs
 echo "Initializing git-lfs..."
 git lfs install
 
