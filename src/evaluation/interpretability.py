@@ -23,6 +23,7 @@ class ScalableFeatureExtractor:
         self.device = device
         self.expansion_factor = expansion_factor
         self.feature_mapper = defaultdict(list)
+        self.feature_mapper_size = 0
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.threshold = threshold
 
@@ -57,13 +58,11 @@ class ScalableFeatureExtractor:
 
     def fill_feature_mapper(self, max_active_features: list[dict[int, float]], token_id: torch.Tensor, context_token_ids: torch.Tensor) -> int:
         context_token_ids_cpu = context_token_ids.cpu().tolist()
-        length_counter = 0
         for j in range(len(max_active_features)):
             for dimension_number, activation_value in max_active_features[j].items():
                 self.feature_mapper[dimension_number].append((activation_value, token_id[j].item(), context_token_ids_cpu[j]))
-                # this tells us how many records are being stored in the dictionary (how many activation values across dimensions)
-                length_counter += 1
-        return length_counter
+                self.feature_mapper_size += 1
+        return self.feature_mapper_size
 
     def flush_to_parquet(self, writer: pq.ParquetWriter, chunk_idx: int):
         """Flush current feature_mapper as a row group into the open ParquetWriter."""
@@ -87,8 +86,9 @@ class ScalableFeatureExtractor:
             writer.write_table(table)
             print(f"  Flushed {len(feature_ids)} records")
             self.feature_mapper.clear()
+            self.feature_mapper_size = 0
 
-   
+
     def process_chunk_batched(self, chunk_file, chunk_idx: int, context_window = 10):
         import time
         print(f"Loading chunk file: {chunk_file}")
@@ -120,7 +120,6 @@ class ScalableFeatureExtractor:
             ('chunk_id', pa.int32()),
         ])
         output_file = self.output_dir / f'chunk_{chunk_idx:04d}.parquet'
-        total_records = 0
 
         with pq.ParquetWriter(output_file, schema) as writer:
             for i in range(0, num_samples, self.batch_size):
@@ -151,7 +150,6 @@ class ScalableFeatureExtractor:
                 length_counter = self.fill_feature_mapper(all_active_features, token_ids_cpu, context_token_ids)
                 if length_counter > self.output_buffer_size:
                     self.flush_to_parquet(writer, chunk_idx)
-                    total_records += length_counter
 
                 loop_time = time.time() - t_loop_start
                 total_time = time.time() - t_batch_start
@@ -214,7 +212,8 @@ def main():
         model = model,
         device = device,
         expansion_factor = expansion_factor,
-        batch_size = batch_size
+        batch_size = batch_size,
+        output_buffer_size = 500000
     )
 
     # Process chunks and upload to wandb
