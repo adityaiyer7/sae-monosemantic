@@ -146,7 +146,7 @@ class ScalableFeatureExtractor:
                 context_token_ids = token_id_batch.unsqueeze(1) + offsets
 
                 active_feature_mapping = self.get_active_features(SAE_encoded_cpu)
-                all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = None)
+                all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = 25)
 
                 length_counter = self.fill_feature_mapper(all_active_features, token_ids_cpu, context_token_ids)
                 if length_counter > self.output_buffer_size:

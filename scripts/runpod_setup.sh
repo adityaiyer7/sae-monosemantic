@@ -7,7 +7,8 @@ JUPYTER_PORT=8888
 
 # ── Step 1: Install system packages ───────────────────────────────────
 echo "==> Installing system packages..."
-apt-get update -qq && apt-get install -y -qq rsync
+apt-get update -qq && apt-get install -y -qq rsync git-lfs
+git lfs install
 
 # ── Step 1.5: Persist GitHub SSH key ──────────────────────────────────
 echo ""
