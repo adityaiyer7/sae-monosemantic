@@ -10,5 +10,5 @@ def sparsity_loss(_lambda:float, features):
 
 def compute_loss(_lambda, prediction, truth, features):
     reconstruction_loss_result = reconstruction_loss(prediction, truth)
-    sparisty_loss_result = sparsity_loss(_lambda, features)
-    return reconstruction_loss_result + sparisty_loss_result
+    sparsity_loss_result = sparsity_loss(_lambda, features)
+    return reconstruction_loss_result + sparsity_loss_result
