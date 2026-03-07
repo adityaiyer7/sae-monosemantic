@@ -1,7 +1,7 @@
 import torch
 from itertools import islice
 from torch.utils.data import Dataset, DataLoader
-from src.models.spare_autoencoder import SparseAutoEncoder
+from src.models.sparse_autoencoder import SparseAutoEncoder
 from src.training.dataset_creator import ChunkIterableGenerator
 from src.training.losses import compute_loss
 from typing import Optional, Callable
@@ -16,6 +16,7 @@ class SAETrainer:
         optimizer: torch.optim.Optimizer,
         loss_fn: Optional[Callable] = None,
         device: Optional[torch.device] = None,
+        _lambda: float = 0.01,
     ):
 
         self.model = model
@@ -23,6 +24,7 @@ class SAETrainer:
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.device = device
+        self._lambda = _lambda
         self.training_losses: list[float] = []
         
 
@@ -36,7 +38,7 @@ class SAETrainer:
 
                 features, results = self.model.forward(activations)
 
-                loss = self.loss_fn(results, activations, features)
+                loss = self.loss_fn(self._lambda, results, activations, features)
                 self.training_losses.append(loss.item())
 
                 self.optimizer.zero_grad()
@@ -75,7 +77,7 @@ class SAETrainer:
                 activations = batch["activations"].to(self.device)
 
                 features, results = self.model.forward(activations)
-                loss = self.loss_fn(results, activations, features)
+                loss = self.loss_fn(self._lambda, results, activations, features)
                 evaluation_loss.append(loss.item())
 
                 total_loss += loss.item()

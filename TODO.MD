@@ -54,6 +54,9 @@
   - [ ] fewer, longer runs on the largest cache you can store
   - [ ] change one major factor at a time (λ, width, norm schedule, resampling cadence)
 
+### P5 - Configure Hugging Face Connection
+- [ ] Goal: connect Hugging Face for easier data management (datasets/artifacts, versioning, and sharing).
+
 ### Suggested execution order (if time/compute constrained)
 1. [ ] Pre-encoder bias + correct loss scaling
 2. [ ] Logging KPIs: firing rates, dead features, top-K contexts

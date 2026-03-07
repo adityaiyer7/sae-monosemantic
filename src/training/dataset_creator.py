@@ -1,15 +1,28 @@
 import torch
 import glob
-import re 
+import re
 import random
+import warnings
 
 def natural_sort_key(path):
     """Extract numbers from filename for proper numeric sorting."""
     return [int(text) if text.isdigit() else text.lower() 
             for text in re.split(r'(\d+)', path)]
 
-def split_files(chunk_dir: str, train_ratio: float = 0.8, val_ratio: float = 0.1, test_ratio: float=0.1, seed: int = 42):
-    files = sorted(glob.glob(f"{chunk_dir}/*.pt"), key = natural_sort_key)
+def split_files(chunk_dir: str, train_ratio: float = 0.8, val_ratio: float = 0.1, test_ratio: float = 0.1, seed: int = 42):
+    total_ratio = train_ratio + val_ratio + test_ratio
+    if total_ratio > 1.0:
+        raise ValueError(
+            f"Ratios must sum to at most 1.0, got train_ratio={train_ratio}, val_ratio={val_ratio}, "
+            f"test_ratio={test_ratio} (sum={total_ratio})"
+        )
+    if total_ratio < 1.0:
+        warnings.warn(
+            f"Ratios sum to {total_ratio} < 1.0; some files will not be assigned to train/val/test splits.",
+            UserWarning,
+            stacklevel=2,
+        )
+    files = sorted(glob.glob(f"{chunk_dir}/*.pt"), key=natural_sort_key)
     rng = random.Random(seed)
     rng.shuffle(files)
     n = len(files)
@@ -21,22 +34,22 @@ def split_files(chunk_dir: str, train_ratio: float = 0.8, val_ratio: float = 0.1
 
 class ChunkIterableGenerator(torch.utils.data.IterableDataset):
     """An iterable dataset that loads and yields data chunks from PyTorch files.
-    
+
     This class extends PyTorch's IterableDataset to efficiently load pre-processed
     activation data stored in chunk files. It supports multi-worker data loading
     by distributing chunk files across workers, and optionally applies transforms
     to each sample.
-    
+
     Attributes:
-        chunk_dir (str): Directory path containing the chunk files (.pt files).
+        chunk_files (list): Sorted list of paths to chunk files (.pt files).
         transform (callable, optional): Optional transform function to apply to each sample.
-        chunk_files (list): Sorted list of chunk file paths.
     """
-    def __init__(self,chunk_files, transform = None):
+
+    def __init__(self, chunk_files, transform=None):
         """Initialize the ChunkIterableGenerator.
-        
+
         Args:
-            chunk_dir (str): Path to the directory containing chunk files (.pt files).
+            chunk_files: List of paths to chunk files (.pt files).
             transform (callable, optional): Optional transform function to apply to each sample.
                 The transform should accept a dictionary with 'token_ids' and 'activations' keys
                 and return a transformed dictionary. Defaults to None.

@@ -6,7 +6,7 @@ import torch
 from collections import defaultdict
 from typing import DefaultDict, Tuple, Optional
 from pathlib import Path
-from src.models.spare_autoencoder import SparseAutoEncoder
+from src.models.sparse_autoencoder import SparseAutoEncoder
 from src.training.dataset_creator import natural_sort_key
 from transformers import GPT2Tokenizer
 import json
@@ -43,12 +43,13 @@ class ScalableFeatureExtractor:
 
     
     def get_max_activating_features(self,active_features:list[DefaultDict[int, float]], top_k:Optional[int], sort_order:str='descending')->list[DefaultDict[int, float]]:
-        if not top_k:
+        if top_k is None:
             return active_features
         res = []
         for j in range(len(active_features)):
             feature_map = active_features[j]
-            assert(sort_order == 'descending' or sort_order == 'ascending')
+            if sort_order not in('descending','ascending'):
+                raise ValueError("sort_order must be either descending or ascending")
             is_descending = (sort_order == 'descending')
             sorted_items = sorted(feature_map.items(), key = lambda x:x[1], reverse = is_descending)
             k = min(top_k, len(sorted_items))
@@ -128,6 +129,22 @@ class ScalableFeatureExtractor:
                 token_id_batch = token_ids[i: i + self.batch_size].to(self.device)
                 activations_batch = activations[i: i + self.batch_size].to(self.device)
 
+                # the idea here is that when building the context, we need positions relative to the global tensor, and not just the batch (since we can go out of bounds)
+                # we're now computing the indices and then storing the token_ids (this will be decoded later during analysis) 
+                # global position of each element in this batch
+                positions = torch.arange(i, i + len(token_id_batch)) # shape: [batch_size]
+
+                # for each position, gather context tokens
+                # shape: [batch_size, 2*context_window+1]
+                context_start_idx = -context_window
+                context_end_index = context_window + 1
+                offsets = torch.arange(context_start_idx, context_end_index, device='cpu')
+
+                context_indices = positions.unsqueeze(1) + offsets
+                context_indices = context_indices.clamp(0, num_samples - 1)
+                context_token_ids = token_ids[context_indices]
+ 
+
                 t_gpu_start = time.time()
                 with torch.no_grad():
                     SAE_encoded_rep, results = self.model.forward(activations_batch)
@@ -138,11 +155,7 @@ class ScalableFeatureExtractor:
                 t_loop_start = time.time()
                 gpu_time = t_loop_start - t_gpu_start
 
-                context_start_idx = -context_window
-                context_end_index = context_window + 1
-                offsets = torch.arange(context_start_idx, context_end_index, device=token_id_batch.device)
 
-                context_token_ids = token_id_batch.unsqueeze(1) + offsets
 
                 active_feature_mapping = self.get_active_features(SAE_encoded_cpu)
                 all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = 25)

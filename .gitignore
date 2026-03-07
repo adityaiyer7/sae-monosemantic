@@ -35,3 +35,4 @@ venv/
 
 # Wandb local run artifacts (synced to cloud)
 wandb/
+**/*.parquet
