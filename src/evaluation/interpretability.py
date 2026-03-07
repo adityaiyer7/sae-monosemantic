@@ -187,14 +187,14 @@ class ScalableFeatureExtractor:
 
 
 def main():
-    project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
-    # project_root = Path("/workspace/sae-monosemantic")
+    # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
+    project_root = Path("/workspace/sae-monosemantic")
     expansion_factor = 4
     MODEL_SAVE_PATH = project_root / f'model_weights_{expansion_factor}x.pth'
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:1]
+    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
 
     # Initialize wandb
     batch_size = 2048
