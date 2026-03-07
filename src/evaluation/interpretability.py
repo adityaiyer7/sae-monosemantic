@@ -14,6 +14,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import wandb
+from huggingface_hub import HfApi
 
 class ScalableFeatureExtractor:
     def __init__(self, model, device, expansion_factor: int, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07) -> None:
@@ -30,7 +31,6 @@ class ScalableFeatureExtractor:
         # Setup output directory for parquet files
         self.output_dir = Path(f"features/features_{expansion_factor}x")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.chunk_counter = 0
         
 
     
@@ -147,7 +147,7 @@ class ScalableFeatureExtractor:
 
                 t_gpu_start = time.time()
                 with torch.no_grad():
-                    SAE_encoded_rep, results = self.model.forward(activations_batch)
+                    SAE_encoded_rep, _ = self.model.forward(activations_batch)
 
                     SAE_encoded_cpu = SAE_encoded_rep.cpu()
                     token_ids_cpu = token_id_batch.cpu()
@@ -187,14 +187,14 @@ class ScalableFeatureExtractor:
 
 
 def main():
-    # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
-    project_root = Path("/workspace/sae-monosemantic")
+    project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
+    # project_root = Path("/workspace/sae-monosemantic")
     expansion_factor = 4
     MODEL_SAVE_PATH = project_root / f'model_weights_{expansion_factor}x.pth'
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
+    files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)[:1]
 
     # Initialize wandb
     batch_size = 2048
@@ -202,7 +202,7 @@ def main():
         "expansion_factor": expansion_factor,
         "batch_size": batch_size,
         "threshold": 0.07,
-        "top_k": None,  # Using all active features above threshold
+        "top_k": 25,  
         "num_chunks": len(files)
     }
 
@@ -252,6 +252,21 @@ def main():
     print(f"Parquet files saved to: {feature_extractor.output_dir}")
 
     wandb.finish()
+
+    HF_DATASET_REPO = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x"
+    hf_token = os.environ.get("HF_TOKEN")
+
+    parquet_files = sorted(feature_extractor.output_dir.glob("*.parquet"))
+    print(f"\nPushing {len(parquet_files)} parquet files to HuggingFace...")
+    api = HfApi(token=hf_token)
+    api.upload_folder(
+        folder_path=str(feature_extractor.output_dir),
+        path_in_repo="data/",
+        repo_id=HF_DATASET_REPO,
+        repo_type="dataset",
+        commit_message="Add feature activations",
+    )
+    print(f"Pushed to https://huggingface.co/datasets/{HF_DATASET_REPO}")
 
 
 if __name__ == "__main__":
