@@ -95,7 +95,7 @@ class FeatureAnalyzer:
     def _table_exists(self, table_name: str) -> bool:
         EXIST_QUERY = f"""
         SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = 'main' AND table_name = {table_name}
+        WHERE table_schema = 'main' AND table_name = '{table_name}'
         """
         result = self.con.execute(EXIST_QUERY).fetchone()
         return result[0] > 0
@@ -108,10 +108,12 @@ def main():
         HF_dataset_path = "thedarkknight7/SAE_monosemanticity_features_4x",
         db_name = "hf_trial"
     )
-    feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN token_text")
-    print("dropped existing token text column")
-    feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
-    print("dropped existing context text column")
+    feature_analyzer.create_features_table(table_name="hf_trial_table")
+
+    # feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN token_text")
+    # print("dropped existing token text column")
+    # feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
+    # print("dropped existing context text column")
 
 
     print("printing token")
