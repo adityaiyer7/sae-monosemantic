@@ -14,16 +14,8 @@ from transformers import GPT2Tokenizer
 
 user = whoami(token=os.getenv("HF_TOKEN"))
 
-all_files = [
-    f for f in list_repo_files("thedarkknight7/SAE_monosemanticity_features_4x", repo_type = "dataset")
-    if f.endswith(".parquet")
-]
-sample_files = all_files[:5]
-print(sample_files)
 
-dataset = load_dataset("thedarkknight7/SAE_monosemanticity_features_4x", data_files = sample_files, verification_mode = "no_checks")
-
-print(dataset)
+# print(dataset)
 
 # db_name = "hf_trial"
 # con = duckdb.connect(f"{db_name}.db")
@@ -85,10 +77,22 @@ class FeatureAnalyzer:
         if self._table_exists(table_name):
             warnings.warn(f"Table '{table_name}' already exists. Skipping creation.", UserWarning)
             return
+        all_files = [
+            f for f in list_repo_files("thedarkknight7/SAE_monosemanticity_features_4x", repo_type = "dataset")
+            if f.endswith(".parquet")
+        ]
+        sample_files = all_files[:5]
+        print(sample_files)
+
+
+        dataset = load_dataset("thedarkknight7/SAE_monosemanticity_features_4x", data_files = sample_files, verification_mode = "no_checks")
+
+        self.con.register("temp_view", dataset["train"].data.table)
+
         
         CREATE_TABLE_QUERY = f"""
             CREATE TABLE {table_name} AS
-            SELECT * FROM {self.hf_dataset_path} 
+            SELECT * FROM temp_view
          """
         self.con.execute(CREATE_TABLE_QUERY)
 
