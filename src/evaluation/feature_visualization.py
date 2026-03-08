@@ -14,8 +14,16 @@ from transformers import GPT2Tokenizer
 
 user = whoami(token=os.getenv("HF_TOKEN"))
 
+all_files = [
+    f for f in list_repo_files("thedarkknight7/SAE_monosemanticity_features_4x", repo_type = "dataset")
+    if f.endswith(".parquet")
+]
+sample_files = all_files[:5]
+print(sample_files)
 
-# print(dataset)
+dataset = load_dataset("thedarkknight7/SAE_monosemanticity_features_4x", data_files = sample_files, verification_mode = "no_checks")
+
+print(dataset)
 
 # db_name = "hf_trial"
 # con = duckdb.connect(f"{db_name}.db")
@@ -51,19 +59,35 @@ class FeatureAnalyzer:
         self.con.execute(RECONSTRUCT_TOKEN_TEXT_QUERY)
         return self.con.execute(f"SELECT * FROM {table_name} LIMIT 10").df()
 
-    def reconstruct_context_text(self, table_name):
-        ADD_COLUMN_QUERY = f"ALTER TABLE {table_name} ADD COLUMN context_text VARCHAR[]"
-        RECONSTRUCT_CONTEXT_QUERY = f"""
-            UPDATE {table_name} t
-            SET context_text = (
+    # def reconstruct_context_text(self, table_name, limit = 10):
+    #     ADD_COLUMN_QUERY = f"ALTER TABLE {table_name} ADD COLUMN context_text VARCHAR[]"
+    #     RECONSTRUCT_CONTEXT_QUERY = f"""
+    #     SELECT t.*, (
+    #         SELECT list(v.token_text ORDER BY pos)
+    #         FROM unnest(t.context_token_ids) WITH ORDINALITY AS u(tid, pos)
+    #         JOIN vocab v ON u.tid = v.token_id
+    #     ) AS context_text
+    #     FROM {table_name} t
+    #     LIMIT {limit}
+    #     """
+    #     self.con.execute(ADD_COLUMN_QUERY)
+    #     self.con.execute(RECONSTRUCT_CONTEXT_QUERY)
+    #     return self.con.execute(f"SELECT * FROM {table_name} LIMIT 10").df()
+    def reconstruct_context_text(self, table_name, limit=10):
+        self.con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE _subset AS
+            SELECT * FROM {table_name} LIMIT {limit}
+        """)
+        result = self.con.execute("""
+            SELECT s.*, (
                 SELECT list(v.token_text ORDER BY pos)
-                FROM unnest(t.context_token_ids) WITH ORDINALITY AS u(tid, pos)
+                FROM unnest(s.context_token_ids) WITH ORDINALITY AS u(tid, pos)
                 JOIN vocab v ON u.tid = v.token_id
-            )
-        """
-        self.con.execute(ADD_COLUMN_QUERY)
-        self.con.execute(RECONSTRUCT_CONTEXT_QUERY)
-        return self.con.execute(f"SELECT * FROM {table_name} LIMIT 10").df()
+            ) AS context_text
+            FROM _subset s
+        """).df()
+        self.con.execute("DROP TABLE IF EXISTS _subset")
+        return result
 
     
     # Utility Methods
@@ -77,22 +101,10 @@ class FeatureAnalyzer:
         if self._table_exists(table_name):
             warnings.warn(f"Table '{table_name}' already exists. Skipping creation.", UserWarning)
             return
-        all_files = [
-            f for f in list_repo_files("thedarkknight7/SAE_monosemanticity_features_4x", repo_type = "dataset")
-            if f.endswith(".parquet")
-        ]
-        sample_files = all_files[:5]
-        print(sample_files)
-
-
-        dataset = load_dataset("thedarkknight7/SAE_monosemanticity_features_4x", data_files = sample_files, verification_mode = "no_checks")
-
-        self.con.register("temp_view", dataset["train"].data.table)
-
         
         CREATE_TABLE_QUERY = f"""
             CREATE TABLE {table_name} AS
-            SELECT * FROM temp_view
+            SELECT * FROM {self.hf_dataset_path} 
          """
         self.con.execute(CREATE_TABLE_QUERY)
 
@@ -116,12 +128,12 @@ def main():
 
     # feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN token_text")
     # print("dropped existing token text column")
-    # feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
+    feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
     # print("dropped existing context text column")
 
 
-    print("printing token")
-    print(feature_analyzer.reconsturct_token_text(table_name = "hf_trial_table"))
+    # print("printing token")
+    # print(feature_analyzer.reconsturct_token_text(table_name = "hf_trial_table"))
     print(feature_analyzer.reconstruct_context_text(table_name = "hf_trial_table"))
     
 
