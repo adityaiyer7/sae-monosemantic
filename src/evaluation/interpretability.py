@@ -34,7 +34,8 @@ class ScalableFeatureExtractor:
         
 
     
-    def get_active_features(self,x: torch.Tensor)-> list[DefaultDict[int, float]]:
+    def get_active_features(self, x: torch.Tensor) -> list[DefaultDict[int, float]]:
+        """Return per-sample dicts mapping feature index to activation value for all features above threshold."""
         batch_index, active_index = (x > self.threshold).nonzero(as_tuple=True)
         result = [{} for _ in range(x.shape[0])]
         for batch, feature, value in zip(batch_index.tolist(), active_index.tolist(), x[batch_index, active_index].tolist()):
@@ -42,7 +43,14 @@ class ScalableFeatureExtractor:
         return result
 
     
-    def get_max_activating_features(self,active_features:list[DefaultDict[int, float]], top_k:Optional[int], sort_order:str='descending')->list[DefaultDict[int, float]]:
+    def get_max_activating_features(self, active_features: list[DefaultDict[int, float]], top_k: Optional[int], sort_order: str = 'descending') -> list[DefaultDict[int, float]]:
+        """Trim each sample's active features to the top_k by activation value.
+
+        Args:
+            active_features: Per-sample feature activation dicts.
+            top_k: Maximum features to keep per sample. If None, returns unchanged.
+            sort_order: 'descending' keeps highest activations; 'ascending' keeps lowest.
+        """
         if top_k is None:
             return active_features
         res = []
@@ -58,6 +66,11 @@ class ScalableFeatureExtractor:
         return res
 
     def fill_feature_mapper(self, max_active_features: list[dict[int, float]], token_id: torch.Tensor, context_token_ids: torch.Tensor) -> int:
+        """Append activation records to the in-memory feature_mapper buffer.
+
+        Each record stores (activation_value, token_id, context_token_ids) keyed by feature dimension.
+        Returns the updated total number of buffered records.
+        """
         context_token_ids_cpu = context_token_ids.cpu().tolist()
         for j in range(len(max_active_features)):
             for dimension_number, activation_value in max_active_features[j].items():
@@ -90,7 +103,13 @@ class ScalableFeatureExtractor:
             self.feature_mapper_size = 0
 
 
-    def process_chunk_batched(self, chunk_file, chunk_idx: int, context_window = 10):
+    def process_chunk_batched(self, chunk_file, chunk_idx: int, context_window: int = 10):
+        """Run the SAE over a single activation chunk file and write results to a parquet file.
+
+        Loads token IDs and residual activations from chunk_file, processes them in batches,
+        and streams feature activation records to features/features_{N}x/chunk_{idx}.parquet.
+        Context tokens within context_window positions of each token are stored alongside each record.
+        """
         import time
         print(f"Loading chunk file: {chunk_file}")
 
