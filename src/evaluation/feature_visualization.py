@@ -44,6 +44,9 @@ class FeatureAnalyzer:
         self.db_name = db_name
         self.con = duckdb.connect(f'{self.db_name}.db')
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.con.execute(f"""
+            CREATE SECRET IF NOT EXISTS hf_token (TYPE huggingface, TOKEN '{os.getenv("HF_TOKEN")}')
+        """)
         self.build_vocab_table()
     
     # core analysis methods
@@ -58,6 +61,15 @@ class FeatureAnalyzer:
         self.con.execute(ADD_COLUMN_QUERY)
         self.con.execute(RECONSTRUCT_TOKEN_TEXT_QUERY)
         return self.con.execute(f"SELECT * FROM {table_name} LIMIT 10").df()
+    
+    def number_of_features_per_dimension(self, table_name):
+        NUM_FEATURES_QUERY = f"""
+            SELECT feature_id, COUNT(*) AS num_features
+            FROM {table_name}
+            GROUP BY feature_id
+            ORDER BY num_features DESC
+        """
+        return self.con.execute(NUM_FEATURES_QUERY).df()
 
     # def reconstruct_context_text(self, table_name, limit = 10):
     #     ADD_COLUMN_QUERY = f"ALTER TABLE {table_name} ADD COLUMN context_text VARCHAR[]"
@@ -104,7 +116,7 @@ class FeatureAnalyzer:
         
         CREATE_TABLE_QUERY = f"""
             CREATE TABLE {table_name} AS
-            SELECT * FROM {self.hf_dataset_path} 
+            SELECT * FROM 'hf://datasets/{self.hf_dataset_path}/data/*.parquet'
          """
         self.con.execute(CREATE_TABLE_QUERY)
 
@@ -125,16 +137,17 @@ def main():
         db_name = "hf_trial"
     )
     feature_analyzer.create_features_table(table_name="hf_trial_table")
+    print(feature_analyzer.number_of_features_per_dimension(table_name="hf_trial_table"))
 
     # feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN token_text")
     # print("dropped existing token text column")
-    feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
+    #feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
     # print("dropped existing context text column")
 
 
     # print("printing token")
     # print(feature_analyzer.reconsturct_token_text(table_name = "hf_trial_table"))
-    print(feature_analyzer.reconstruct_context_text(table_name = "hf_trial_table"))
+   #print(feature_analyzer.reconstruct_context_text(table_name = "hf_trial_table"))
     
 
 
