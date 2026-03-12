@@ -132,7 +132,6 @@ class FeatureAnalyzer:
         WHERE t.feature_id IS NULL
         """
         return self.con.execute(GET_DEAD_FEATURES).df()
-         
 
     # Utility Methods
     def build_vocab_table(self):
@@ -165,13 +164,13 @@ class FeatureAnalyzer:
 
 def main():
     feature_analyzer = FeatureAnalyzer(
-        HF_dataset_path = "thedarkknight7/SAE_monosemanticity_features_32x",
+        HF_dataset_path = "thedarkknight7/SAE_monosemanticity_features_4x",
         db_name = "hf_trial",
-        expansion_factor = 32
+        expansion_factor = 4
     )
-    feature_analyzer.create_features_table(table_name="hf_32x_full")
+    feature_analyzer.create_features_table(table_name="hf_4x_full")
     print("created full database from HF!")
-    print(feature_analyzer.get_dead_features(table_name = "hf_32x_full"))
+    print(feature_analyzer.get_dead_features(table_name = "hf_4x_full"))
     # top_activations_df = feature_analyzer.get_top_activations(table_name = "hf_trial_table", feature_id = 3053, top_k = 25)
     # reconstructed_df = feature_analyzer.reconstruct_context_text(df=top_activations_df)
     # reconstructed_df = feature_analyzer.reconstruct_token_text(df = reconstructed_df)
