@@ -227,12 +227,14 @@ def main(expansion_factor: int, _lambda: float):
     # Download model weights from HF bucket
     HF_BUCKET = "hf://buckets/thedarkknight7/sae-for-monosemanticity-model-weights"
     weight_filename = f"model_weights_{expansion_factor}x_{_lambda}.pth"
-    local_weights_path = project_root / weight_filename
+    local_weights_dir = project_root / "model_weights"
+    local_weights_path = local_weights_dir / weight_filename
 
     if not local_weights_path.exists():
         print(f"Downloading {weight_filename} from HF bucket...")
+        local_weights_dir.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["hf", "sync", f"{HF_BUCKET}/{weight_filename}", str(local_weights_path)],
+            ["hf", "sync", HF_BUCKET, str(local_weights_dir)],
             capture_output=True, text=True,
             env={**os.environ, "HF_TOKEN": os.environ.get("HF_TOKEN", "")},
         )
