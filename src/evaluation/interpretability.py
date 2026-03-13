@@ -210,6 +210,9 @@ class ScalableFeatureExtractor:
 def main(expansion_factor: int, _lambda: float):
     # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
     project_root = Path("/workspace/sae-monosemantic")
+
+    print(f"WANDB_API_KEY: {str(os.environ.get('WANDB_API_KEY'))[:4]}...")
+    print(f"HF_TOKEN: {str(os.environ.get('HF_TOKEN'))[:4]}...")
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -313,4 +316,4 @@ def main(expansion_factor: int, _lambda: float):
 
 
 if __name__ == "__main__":
-    main(expansion_factor=4, _lambda=0.01)
+    main(expansion_factor=4, _lambda=1e-4)
