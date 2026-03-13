@@ -2,6 +2,7 @@ import sys
 import re
 import glob
 import os
+import subprocess
 import torch
 from collections import defaultdict
 from typing import DefaultDict, Tuple, Optional
@@ -17,19 +18,20 @@ import wandb
 from huggingface_hub import HfApi
 
 class ScalableFeatureExtractor:
-    def __init__(self, model, device, expansion_factor: int, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07) -> None:
+    def __init__(self, model, device, expansion_factor: int, _lambda: float, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07) -> None:
         self.model = model
         self.batch_size = batch_size
         self.output_buffer_size = output_buffer_size
         self.device = device
         self.expansion_factor = expansion_factor
+        self._lambda = _lambda
         self.feature_mapper = defaultdict(list)
         self.feature_mapper_size = 0
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.threshold = threshold
 
         # Setup output directory for parquet files
-        self.output_dir = Path(f"features/features_{expansion_factor}x")
+        self.output_dir = Path(f"features/features_{expansion_factor}x_{_lambda}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
 
@@ -205,23 +207,41 @@ class ScalableFeatureExtractor:
 
 
 
-def main():
+def main(expansion_factor: int, _lambda: float):
     # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
     project_root = Path("/workspace/sae-monosemantic")
-    expansion_factor = 4
-    MODEL_SAVE_PATH = project_root / f'model_weights_{expansion_factor}x.pth'
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    HF_DATASET_REPO = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x_{_lambda}"
+
     files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
+
+    # Download model weights from HF bucket
+    HF_BUCKET = "hf://buckets/thedarkknight7/sae-for-monosemanticity-model-weights"
+    weight_filename = f"model_weights_{expansion_factor}x_{_lambda}.pth"
+    local_weights_path = project_root / weight_filename
+
+    if not local_weights_path.exists():
+        print(f"Downloading {weight_filename} from HF bucket...")
+        result = subprocess.run(
+            ["hf", "sync", f"{HF_BUCKET}/{weight_filename}", str(local_weights_path)],
+            capture_output=True, text=True,
+            env={**os.environ, "HF_TOKEN": os.environ.get("HF_TOKEN", "")},
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to download weights: {result.stderr}")
+    else:
+        print(f"Using cached weights at {local_weights_path}")
 
     # Initialize wandb
     batch_size = 2048
     wandb_config = {
         "expansion_factor": expansion_factor,
+        "_lambda": _lambda,
         "batch_size": batch_size,
         "threshold": 0.07,
-        "top_k": 25,  
+        "top_k": 25,
         "num_chunks": len(files)
     }
 
@@ -230,10 +250,10 @@ def main():
         project="sae-for-monosemanticity",
         job_type="feature-extraction",
         config=wandb_config,
-        name=f"feature-extraction-{expansion_factor}x"
+        name=f"feature-extraction-{expansion_factor}x_{_lambda}"
     )
 
-    state_dict = torch.load(MODEL_SAVE_PATH, weights_only=True, map_location = device)
+    state_dict = torch.load(local_weights_path, weights_only=True, map_location=device)
 
     model = SparseAutoEncoder(d_model=768, expansion_factor=expansion_factor)
     model.load_state_dict(state_dict)
@@ -244,6 +264,7 @@ def main():
         model = model,
         device = device,
         expansion_factor = expansion_factor,
+        _lambda = _lambda,
         batch_size = batch_size,
         output_buffer_size = 500000
     )
@@ -256,37 +277,40 @@ def main():
             continue
         parquet_file = feature_extractor.process_chunk_batched(file, chunk_idx)
 
-        # Upload parquet file to wandb as artifact
-        if parquet_file:
-            artifact = wandb.Artifact(
-                name=f"feature-chunk-{expansion_factor}x",
-                type="feature-data",
-                description=f"Feature activations for {expansion_factor}x SAE model"
-            )
-            artifact.add_file(str(parquet_file))
-            run.log_artifact(artifact)
-            print(f"Uploaded {parquet_file.name} to wandb")
-
     print(f"\nCompleted processing {len(files)} chunks.")
     print(f"Parquet files saved to: {feature_extractor.output_dir}")
 
+    # Log HF dataset link to wandb
+    hf_dataset_url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}"
+    run.config.update({"hf_dataset_url": hf_dataset_url})
+    run.notes = f"Features dataset: {hf_dataset_url}"
+    print(f"Logged HF dataset link to wandb: {hf_dataset_url}")
+
     wandb.finish()
 
-    HF_DATASET_REPO = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x"
+    # Upload parquet files to HuggingFace dataset
     hf_token = os.environ.get("HF_TOKEN")
+    api = HfApi(token=hf_token)
+
+    # Create the dataset repo if it doesn't exist
+    api.create_repo(
+        repo_id=HF_DATASET_REPO,
+        repo_type="dataset",
+        exist_ok=True,
+    )
+    print(f"Ensured HF dataset repo exists: {HF_DATASET_REPO}")
 
     parquet_files = sorted(feature_extractor.output_dir.glob("*.parquet"))
     print(f"\nPushing {len(parquet_files)} parquet files to HuggingFace...")
-    api = HfApi(token=hf_token)
     api.upload_folder(
         folder_path=str(feature_extractor.output_dir),
         path_in_repo="data/",
         repo_id=HF_DATASET_REPO,
         repo_type="dataset",
-        commit_message="Add feature activations",
+        commit_message=f"Add feature activations for {expansion_factor}x lambda={_lambda}",
     )
-    print(f"Pushed to https://huggingface.co/datasets/{HF_DATASET_REPO}")
+    print(f"Pushed to {hf_dataset_url}")
 
 
 if __name__ == "__main__":
-    main()
+    main(expansion_factor=4, _lambda=0.01)
