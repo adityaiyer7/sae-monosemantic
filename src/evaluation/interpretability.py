@@ -16,6 +16,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import wandb
 from huggingface_hub import HfApi
+from dotenv import load_dotenv
+
 
 class ScalableFeatureExtractor:
     def __init__(self, model, device, expansion_factor: int, _lambda: float, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07) -> None:
@@ -210,6 +212,8 @@ class ScalableFeatureExtractor:
 def main(expansion_factor: int, _lambda: float):
     # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
     project_root = Path("/workspace/sae-monosemantic")
+
+    load_dotenv(project_root / ".env")
 
     print(f"WANDB_API_KEY: {str(os.environ.get('WANDB_API_KEY'))[:4]}...")
     print(f"HF_TOKEN: {str(os.environ.get('HF_TOKEN'))[:4]}...")
