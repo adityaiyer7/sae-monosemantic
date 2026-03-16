@@ -1,12 +1,15 @@
 import os
 import warnings
 import duckdb
+from pathlib import Path
+from dotenv import load_dotenv
 import pandas as pd
 from datasets import load_dataset
 from huggingface_hub import list_repo_files
 from huggingface_hub import login
 from huggingface_hub import whoami
 from transformers import GPT2Tokenizer
+import matplotlib.pyplot as plt
 
 
 # Note: feature_id is the SAE feature dimension index
@@ -21,14 +24,18 @@ class FeatureAnalyzer:
         self.db_name = db_name
         self.con = duckdb.connect(f'{self.db_name}.db')
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.con.execute("DROP SECRET IF EXISTS hf_token")
+
         self.con.execute(f"""
-            CREATE SECRET IF NOT EXISTS hf_token (TYPE huggingface, TOKEN '{os.getenv("HF_TOKEN")}')
+        CREATE SECRET hf_token (TYPE huggingface, TOKEN '{os.getenv("HF_TOKEN")}')
         """)
         self.expansion_factor = expansion_factor
         self.model_hidden_dim_size = model_hidden_dim_size
-        # self.build_vocab_table()
+        self.build_vocab_table()
     
-    # core analysis methods
+    """
+    Token and context Reconstruction Methods
+    """
     def reconstruct_token_text(self, df: pd.DataFrame) -> pd.DataFrame:
         self.con.register("_input", df)
         result = self.con.execute("""
@@ -52,6 +59,31 @@ class FeatureAnalyzer:
         result = self.con.execute(RECONSTRUCT_CONTEXT_QUERY).df()
         self.con.unregister("_input")
         return result
+    
+    def get_context_string(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Join the context text array into a single readable string with the activating token highlighted
+        This method assumes, reconstruct_context_text and reconstruct_token_text have already been called before
+        """
+        ACTIVATING_TOKEN_IDX  = 10
+
+        def build_string(row):
+            context_list = []
+            for idx, text in enumerate(row["context_text"]):
+                if idx == ACTIVATING_TOKEN_IDX:
+                    context_list.append(f"**{row['token_text']}**")
+                else:
+                    context_list.append(text)
+            return ''.join(context_list)
+
+        df["context_string"] = df.apply(build_string, axis=1)
+        return df
+                        
+
+    
+    """
+    Per Feature Analysis
+    """
     
     
     def get_top_activations(self, table_name: str, feature_id: int, top_k: int, sort_order:str = 'descending') -> pd.DataFrame:
@@ -88,7 +120,7 @@ class FeatureAnalyzer:
         """
         This gives us the fraction of tokens that activate this feature relative to all activation events
         In simple terms, "what fraction of all activation events activate this feature"
-        Idea here is that out of all tokens that caused some activation (above our threshold), what fraction activated this feature?
+        Idea here is that out of all tokens that caused some activation (above our threshold set in intepretability.py), what fraction activated this feature?
         """
         FEATURE_DENSITY_QUERY = f"""
             SELECT feature_id, COUNT(*)/(SELECT COUNT(*) FROM {table_name}) AS feature_density
@@ -98,27 +130,74 @@ class FeatureAnalyzer:
         return self.con.execute(FEATURE_DENSITY_QUERY).df()
 
 
-    def get_activation_distribution(self, table_name:str, feature_id: int, save_figs:bool = False):
+    def get_activation_distribution(self, table_name:str, feature_id: int, save_figs:bool = False, figs_dir: str = "figs"):
         """
+        """
+        FILTER_QUERY = f"""
+        SELECT *
+        FROM {table_name}
+        WHERE feature_id = {feature_id}
         """
 
-        # get number of unique tokens represented by in this dimension
-        # get mean activations
-        # get standard deviation of activations
-        # get percentiles of activation values
-        # TODO
-        pass
+        filtered_df = self.con.execute(FILTER_QUERY).df()
+        mean_activation_score = filtered_df["activation_value"].mean()
+        median_activation_score = filtered_df["activation_value"].median()
+        standard_deviatin_activation_scores = filtered_df["activation_value"].std()
+        activation_value_25th_percentile = filtered_df["activation_value"].quantile(q = 0.25)
+        activation_value_75th_percentile = filtered_df["activation_value"].quantile(q = 0.75)
+
+        unique_token_ids = set(filtered_df["token_id"])
+        unique_token_id_count = len(unique_token_ids)
+
+        if save_figs:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.hist(filtered_df["activation_value"], bins=50, color="steelblue", edgecolor="white", alpha=0.8)
+            ax.axvline(mean_activation_score, color="red", linestyle="--", linewidth=1.5, label=f"Mean: {mean_activation_score:.3f}")
+            ax.axvline(median_activation_score, color="orange", linestyle="--", linewidth=1.5, label=f"Median: {median_activation_score:.3f}")
+            ax.axvline(activation_value_25th_percentile, color="green", linestyle=":", linewidth=1.2, label=f"25th pct: {activation_value_25th_percentile:.3f}")
+            ax.axvline(activation_value_75th_percentile, color="purple", linestyle=":", linewidth=1.2, label=f"75th pct: {activation_value_75th_percentile:.3f}")
+            ax.set_xlabel("Activation Value")
+            ax.set_ylabel("Count")
+            ax.set_title(f"Activation Distribution — Feature {feature_id}")
+            ax.legend()
+            fig.tight_layout()
+            Path(figs_dir).mkdir(parents=True, exist_ok=True)
+            fig.savefig(f"{figs_dir}/feature_{feature_id}_activation_dist.png", dpi=150)
+            plt.close(fig)
+
+        return {
+            "mean_activation_score" : mean_activation_score,
+            "median_activation_score": median_activation_score,
+            "standard_deviatin_activation_scores": standard_deviatin_activation_scores,
+            "activation_value_25th_percentile": activation_value_25th_percentile,
+            "activation_value_75th_percentile":activation_value_75th_percentile,
+            "unique_token_id_count": unique_token_id_count
+        }
     
-    def get_activation_distribution_per_token_id(self, table_name:str, feature_id: int, save_figs:bool = False):
+    def get_activation_distribution_per_token_id(self, table_name:str, token_id: int):
         """
         """
         # for each unique token_id (that could appear in different contexts), calculate the following
-        # get mean activations
-        # get standard deviation of activations
-        # get percentiles of activation values
-        # TODO
-        pass
-    
+        # get number of features that activate for the token
+        # get all feature_ids that activate
+        FILTER_QUERY = f"""
+        SELECT * 
+        FROM {table_name}
+        WHERE token_id = {token_id}
+        """
+        filtered_df = self.con.execute(FILTER_QUERY).df()
+        features_activated_by_token = set(filtered_df["feature_id"])
+        num_features_activated_by_token = len(features_activated_by_token)
+
+        return {
+            "features_activated_by_token": features_activated_by_token,
+            "num_features_activated_by_token" : num_features_activated_by_token
+        }
+
+
+    """
+    Cross Feature Analysis
+    """
     def get_dead_features(self, table_name:str):
         """
         This gives us the feature_id's (dimensions) that didn't fire for any input. 
@@ -133,7 +212,10 @@ class FeatureAnalyzer:
         """
         return self.con.execute(GET_DEAD_FEATURES).df()
 
-    # Utility Methods
+    
+    """
+    Utility Methods
+    """
     def build_vocab_table(self):
         vocab = {v: self.tokenizer.decode([v]) for v in range(self.tokenizer.vocab_size)}
         vocab_df = pd.DataFrame(vocab.items(), columns=["token_id", "token_text"])
@@ -158,38 +240,43 @@ class FeatureAnalyzer:
         """
         result = self.con.execute(EXIST_QUERY).fetchone()
         return result[0] > 0
-    
+        
 
 
 
-def main():
+def main(expansion_factor: int, _lambda: float):
+    project_root = Path(__file__).parents[2]
+    load_dotenv(project_root / ".env")
+
+    HF_dataset_path = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x_{_lambda}"
+    table_name=f"hf_{expansion_factor}x_{str(_lambda).replace('.', '_')}_full"
+
     feature_analyzer = FeatureAnalyzer(
-        HF_dataset_path = "thedarkknight7/SAE_monosemanticity_features_4x",
+        HF_dataset_path = HF_dataset_path,
         db_name = "hf_trial",
-        expansion_factor = 4
+        expansion_factor = expansion_factor
     )
-    feature_analyzer.create_features_table(table_name="hf_4x_full")
+    feature_analyzer.create_features_table(table_name = table_name)
     print("created full database from HF!")
-    print(feature_analyzer.get_dead_features(table_name = "hf_4x_full"))
-    # top_activations_df = feature_analyzer.get_top_activations(table_name = "hf_trial_table", feature_id = 3053, top_k = 25)
+    # top_activations_df = feature_analyzer.get_top_activations(table_name = table_name, feature_id = 3000, top_k = 25)
     # reconstructed_df = feature_analyzer.reconstruct_context_text(df=top_activations_df)
     # reconstructed_df = feature_analyzer.reconstruct_token_text(df = reconstructed_df)
-    # print(reconstructed_df)
+    # reconstructed_df = feature_analyzer.get_context_string(df = reconstructed_df)
+    # # activation_distribution_res = feature_analyzer.get_activation_distribution(table_name = table_name, feature_id = 3000)
+    # token_id = feature_analyzer.tokenizer.encode("love")[0]
+    # res = feature_analyzer.get_activation_distribution_per_token_id(table_name = table_name, token_id = token_id)
+
+    # print(res)
+
+    dead_features = feature_analyzer.get_dead_features(table_name = table_name)
+    print(dead_features)
 
 
-
-
-    # feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN token_text")
+    # feature_analyzer.con.execute(f"ALTER TABLE {table_name} DROP COLUMN token_text")
     # print("dropped existing token text column")
-    #feature_analyzer.con.execute("ALTER TABLE hf_trial_table DROP COLUMN context_text")
+    #feature_analyzer.con.execute(f"ALTER TABLE {table_name} DROP COLUMN context_text")
     # print("dropped existing context text column")
 
-
-    # print("printing token")
-    # print(feature_analyzer.reconsturct_token_text(table_name = "hf_trial_table"))
-
-
-    #print(feature_analyzer.reconstruct_context_text(table_name = "hf_16x_full"))
 
 
     # python -c "import duckdb; con = duckdb.connect('hf_trial.db'); con.execute('DROP TABLE IF EXISTS hf_16x_full'); print('done')"
@@ -197,4 +284,4 @@ def main():
 
 
 if __name__ == "__main__":    
-    main()
+    main(expansion_factor=8, _lambda=1e-4)
