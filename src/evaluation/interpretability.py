@@ -29,6 +29,7 @@ class ScalableFeatureExtractor:
         self._lambda = _lambda
         self.feature_mapper = defaultdict(list)
         self.feature_mapper_size = 0
+        self.alive_features: set[int] = set()
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.threshold = threshold
 
@@ -181,6 +182,8 @@ class ScalableFeatureExtractor:
 
 
                 active_feature_mapping = self.get_active_features(SAE_encoded_cpu)
+                for sample in active_feature_mapping:
+                    self.alive_features.update(sample.keys())
                 all_active_features = self.get_max_activating_features(active_feature_mapping, top_k = 25)
 
                 length_counter = self.fill_feature_mapper(all_active_features, token_ids_cpu, context_token_ids)
@@ -210,8 +213,8 @@ class ScalableFeatureExtractor:
 
 
 def main(expansion_factor: int, _lambda: float):
-    # project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
-    project_root = Path("/workspace/sae-monosemantic")
+    project_root = Path.cwd() if (Path.cwd() / "src").exists() else Path.cwd().parent
+    # project_root = Path("/workspace/sae-monosemantic")
 
     load_dotenv(project_root / ".env")
 
@@ -234,7 +237,7 @@ def main(expansion_factor: int, _lambda: float):
         print(f"Downloading {weight_filename} from HF bucket...")
         local_weights_dir.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["hf", "sync", HF_BUCKET, str(local_weights_dir)],
+            ["uvx", "hf", "sync", HF_BUCKET, str(local_weights_dir)],
             capture_output=True, text=True,
             env={**os.environ, "HF_TOKEN": os.environ.get("HF_TOKEN", "")},
         )
@@ -289,6 +292,13 @@ def main(expansion_factor: int, _lambda: float):
     print(f"\nCompleted processing {len(files)} chunks.")
     print(f"Parquet files saved to: {feature_extractor.output_dir}")
 
+    alive_features_filename = f"alive_features_{expansion_factor}x_{_lambda}.json"
+    alive_features_path = feature_extractor.output_dir / alive_features_filename
+    with open(alive_features_path, "w") as f:
+        json.dump(sorted(feature_extractor.alive_features), f)
+    total_features = 768 * expansion_factor
+    print(f"Alive features: {len(feature_extractor.alive_features)} / {total_features} ({100 * len(feature_extractor.alive_features) / total_features:.1f}%)")
+
     # Log HF dataset link to wandb
     hf_dataset_url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}"
     run.config.update({"hf_dataset_url": hf_dataset_url})
@@ -318,7 +328,16 @@ def main(expansion_factor: int, _lambda: float):
         repo_type="dataset",
         commit_message=f"Add feature activations for {expansion_factor}x lambda={_lambda}",
     )
+    print(f"Pushing alive_features to HuggingFace...")
+    api.upload_file(
+        path_or_fileobj=str(alive_features_path),
+        path_in_repo=alive_features_filename,
+        repo_id=HF_DATASET_REPO,
+        repo_type="dataset",
+        commit_message=f"Add alive features index for {expansion_factor}x lambda={_lambda}",
+    )
     print(f"Pushed to {hf_dataset_url}")
+    
 
 
 if __name__ == "__main__":

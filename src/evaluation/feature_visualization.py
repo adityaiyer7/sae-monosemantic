@@ -1,11 +1,12 @@
 import os
+import json
 import warnings
 import duckdb
 from pathlib import Path
 from dotenv import load_dotenv
 import pandas as pd
 from datasets import load_dataset
-from huggingface_hub import list_repo_files
+from huggingface_hub import list_repo_files, hf_hub_download
 from huggingface_hub import login
 from huggingface_hub import whoami
 from transformers import GPT2Tokenizer
