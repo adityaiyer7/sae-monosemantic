@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "datasets>=4.5.0",
     "duckdb>=1.4.4",
+    "hf-xet>=1.2.0",
     "ipykernel>=7.2.0",
     "matplotlib>=3.10.8",
     "nbformat>=5.10.4",

@@ -3315,6 +3315,7 @@ source = { editable = "." }
 dependencies = [
     { name = "datasets" },
     { name = "duckdb" },
+    { name = "hf-xet" },
     { name = "ipykernel" },
     { name = "matplotlib" },
     { name = "nbformat" },
@@ -3339,6 +3340,7 @@ dependencies = [
 requires-dist = [
     { name = "datasets", specifier = ">=4.5.0" },
     { name = "duckdb", specifier = ">=1.4.4" },
+    { name = "hf-xet", specifier = ">=1.2.0" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "nbformat", specifier = ">=5.10.4" },
