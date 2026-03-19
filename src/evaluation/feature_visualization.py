@@ -194,12 +194,61 @@ class FeatureAnalyzer:
             "features_activated_by_token": features_activated_by_token,
             "num_features_activated_by_token" : num_features_activated_by_token
         }
+    
+    def get_co_occuring_features(self, table_name: str, feature_id: int, activation_percentile: float = 0.75):
+        """
+        For a given feature, find which other features frequently fire on the same tokens.
+
+        Only tokens whose activation value for feature_id meets or exceeds the specified
+        percentile threshold are considered — this avoids polluting results with tokens
+        that only marginally activate the feature. 
+        
+        Also, we chose to take the percentile over a fixed number to make it scale invariant. 
+
+        Args:
+            table_name: Name of the activations table.
+            feature_id: The SAE feature dimension index to analyse.
+            activation_percentile: Percentile (0–1) used to threshold activations for
+                feature_id before computing co-occurrences. Defaults to 0.75 (top quartile).
+
+        Returns:
+            DataFrame with columns [feature_id, co_occurrence_count], sorted descending
+            by co_occurrence_count (number of distinct tokens shared with feature_id).
+        """
+        if not (0 <= activation_percentile <= 1):
+            raise ValueError("activation_percentile must be between 0 and 1")
+
+        THRESHOLD_QUERY = f"""
+        SELECT QUANTILE_CONT(activation_value, {activation_percentile}) AS threshold
+        FROM {table_name}
+        WHERE feature_id = {feature_id}
+        """
+        threshold = self.con.execute(THRESHOLD_QUERY).fetchone()[0]
+
+        CO_OCCURING_QUERY = f"""
+        SELECT
+            t.feature_id,
+            COUNT(DISTINCT t.token_id) AS co_occurrence_count,
+            LIST(DISTINCT t.token_id) AS token_ids
+        FROM {table_name} t
+        WHERE t.token_id IN (
+            SELECT token_id
+            FROM {table_name}
+            WHERE feature_id = {feature_id}
+            AND activation_value >= {threshold}
+        )
+        AND t.feature_id != {feature_id}
+        GROUP BY t.feature_id
+        ORDER BY co_occurrence_count DESC
+        """
+        return self.con.execute(CO_OCCURING_QUERY).df()
 
 
     """
     Cross Feature Analysis
     """
     def get_dead_features(self, table_name:str):
+        # TODO - this method has to be re-written following the changes in @interpretability.py
         """
         This gives us the feature_id's (dimensions) that didn't fire for any input. 
         """
@@ -212,8 +261,190 @@ class FeatureAnalyzer:
         WHERE t.feature_id IS NULL
         """
         return self.con.execute(GET_DEAD_FEATURES).df()
+    
+    def feature_similarity_cosine_similarity(self, table_name: str, feature_id_i: int, feature_id_j: int) -> float:
+        """
+        Compute cosine similarity between two SAE features based on their activation patterns
+        over the token vocabulary.
+
+        Each feature is represented as a sparse vector over token_id space, where each entry
+        is the max activation value observed for that token across all contexts. Cosine similarity
+        between these vectors captures whether the two features tend to fire on the same tokens
+        with similar magnitudes.
+
+        Note: this operates in token-type space (aggregated by token_id), not context space.
+        Two features that fire on the same token in different contexts will appear similar even
+        if they represent distinct concepts. See TODO.md for a discussion of context-aware similarity.
+
+        Args:
+            table_name: Name of the activations table.
+            feature_id_i: First SAE feature dimension index.
+            feature_id_j: Second SAE feature dimension index.
+
+        Returns:
+            Cosine similarity in [-1, 1]. Returns 0.0 if either feature has no activations.
+        """
+        COS_SIM_QUERY = f"""
+        WITH agg AS (
+            SELECT feature_id, token_id, MAX(activation_value) AS activation
+            FROM {table_name}
+            WHERE feature_id IN ({feature_id_i}, {feature_id_j})
+            GROUP BY feature_id, token_id
+        ),
+        norms AS (
+            SELECT feature_id, SQRT(SUM(activation * activation)) AS norm
+            FROM agg
+            GROUP BY feature_id
+        )
+        SELECT
+            SUM(a.activation * b.activation) / (na.norm * nb.norm) AS cosine_similarity
+        FROM agg a
+        JOIN agg b ON a.token_id = b.token_id AND a.feature_id = {feature_id_i} AND b.feature_id = {feature_id_j}
+        JOIN norms na ON na.feature_id = {feature_id_i}
+        JOIN norms nb ON nb.feature_id = {feature_id_j}
+        """
+        result = self.con.execute(COS_SIM_QUERY).fetchone()
+        if result is None or result[0] is None:
+            return 0.0
+        return result[0]
+
+    def feature_similarity_correlation(self, table_name: str, feature_id_i: int, feature_id_j: int) -> float:
+        """
+        Compute Pearson correlation between two SAE features based on their activation patterns
+        over the token vocabulary.
+
+        Like cosine similarity, each feature is represented as a sparse vector over token_id space
+        (max activation per token). Pearson correlation additionally mean-centers each vector before
+        computing the dot product, so it captures whether the two features co-vary above/below their
+        respective means — rather than just whether they point in the same direction.
+
+        For sparse SAE activations this distinction matters: cosine similarity is dominated by the
+        magnitude of shared high-activation tokens, while correlation is more sensitive to whether
+        the two features consistently activate together relative to their own baselines.
+
+        Note: same token-type space limitation as feature_similarity_cosine_similarity — see TODO.md.
+
+        Args:
+            table_name: Name of the activations table.
+            feature_id_i: First SAE feature dimension index.
+            feature_id_j: Second SAE feature dimension index.
+
+        Returns:
+            Pearson correlation in [-1, 1]. Returns 0.0 if either feature has no activations.
+        """
+        CORRELATION_QUERY = f"""
+        WITH agg AS (
+            SELECT feature_id, token_id, MAX(activation_value) AS activation
+            FROM {table_name}
+            WHERE feature_id IN ({feature_id_i}, {feature_id_j})
+            GROUP BY feature_id, token_id
+        ),
+        means AS (
+            SELECT feature_id, AVG(activation) AS mean_activation
+            FROM agg
+            GROUP BY feature_id
+        ),
+        centered AS (
+            SELECT a.feature_id, a.token_id, a.activation - m.mean_activation AS centered_activation
+            FROM agg a
+            JOIN means m ON a.feature_id = m.feature_id
+        ),
+        stdevs AS (
+            SELECT feature_id, SQRT(SUM(centered_activation * centered_activation)) AS std
+            FROM centered
+            GROUP BY feature_id
+        )
+        SELECT
+            SUM(ci.centered_activation * cj.centered_activation) / (si.std * sj.std) AS correlation
+        FROM centered ci
+        JOIN centered cj ON ci.token_id = cj.token_id AND ci.feature_id = {feature_id_i} AND cj.feature_id = {feature_id_j}
+        JOIN stdevs si ON si.feature_id = {feature_id_i}
+        JOIN stdevs sj ON sj.feature_id = {feature_id_j}
+        """
+        result = self.con.execute(CORRELATION_QUERY).fetchone()
+        if result is None or result[0] is None:
+            return 0.0
+        return result[0]
+
+    # def cluster_features(self,):
+    #     """
+    #     Group features by activation pattern similarity
+    #     """
+    # TODO: Implement this later as this is not a core method. 
+    #     pass
 
     
+    """
+    Interpretability
+    """
+
+    def get_feature_exemplars(self,):
+        """
+        Return top-k full context windows for a feature, showing surrounding tokens (this is what makes features interpretable)
+        """
+        #TODO
+        pass
+    
+    def label_feature(self,):
+        """
+        Given exemplars, use an LLM propose a human-readable label for what the feature detects
+        """
+        #TODO
+        pass
+    
+    def get_token_type_breakdown(self,feature_id:int, table_name:str):
+        """
+        For a feature, show distribution over POS tags, punctuation, named entities, etc.
+        """
+        #TODO
+        FILTER_QUERY = f"""
+        SELECT * 
+        FROM {table_name}
+        WHERE feature_id = {feature_id}
+        """
+        feature_df = self.con.execute(FILTER_QUERY).df()
+        feature_df = self.con.reconstruct_token_text(feature_df)
+        feature_df = self.con.reconstruct_context_text(feature_df)
+        feature_df["joined_context"] = ''.join(feature_df('context_text'))
+        
+
+
+        # Query all rows for feature_id from the table
+        # Call reconstruct_token_text → get token_text
+        # Call reconstruct_context_text → get context_text (list of 21 tokens)
+        # ''.join(context_text) → full sentence (GPT-2 tokens already have spaces baked in, so this produces valid text)
+        # Run spaCy on that string
+        # Find the activating token by character offset: len(''.join(context_text[:10])) gives you the exact start position (since ACTIVATING_TOKEN_IDX = 10 is hardcoded at feature_visualization.py:69)
+        # Use doc.char_span() or iterate over doc to find which spaCy token covers that offset
+
+
+        # Return type:
+        #{
+        # "pos": {"NOUN": 45, "VERB": 12, ...},
+        # "ner": {"PERSON": 8, "O": 80, ...},
+        # "is_stop": {True: 30, False: 70},
+        # "subword_position": {"word_initial": 60, "word_medial": 40},
+        # ...
+        # }
+
+        # Classes 
+            # spaCy (free, from context):
+
+            # POS tag (coarse): NOUN, VERB, ADJ, ADV, DET, PREP, PRON, PUNCT, NUM, X
+            # NER label: PERSON, ORG, GPE, DATE, MONEY, O (not an entity)
+            # Is stop word
+            # Is punctuation
+            # Dependency role: nsubj, dobj, ROOT, amod, det, etc.
+            # Derived without spaCy (from token string alone):
+
+            # Subword position: word-initial (leading space) vs. word-medial
+            # Is numeric (all digits)
+            # Is all-caps
+            # Is title-case
+            # Is whitespace/special character
+
+
+
     """
     Utility Methods
     """
@@ -241,7 +472,25 @@ class FeatureAnalyzer:
         """
         result = self.con.execute(EXIST_QUERY).fetchone()
         return result[0] > 0
-        
+    
+    def drop_table(self, table_name: str):
+        DROP_QUERY = f"""
+        DROP TABLE IF EXISTS {table_name}
+        """
+        self.con.execute(DROP_QUERY)
+    
+    def drop_column(self, table_name: str, column_name:str):
+        DROP_COL_QUERY = f"""
+        ALTER TABLE {table_name} DROP COLUMN {column_name}
+        """
+        self.con.execute(DROP_COL_QUERY)
+
+    def query(self, sql: str) -> pd.DataFrame:
+        return self.con.execute(sql).df()
+
+    def close(self) -> None:
+        self.con.close()
+
 
 
 
@@ -258,29 +507,7 @@ def main(expansion_factor: int, _lambda: float):
         expansion_factor = expansion_factor
     )
     feature_analyzer.create_features_table(table_name = table_name)
-    print("created full database from HF!")
-    # top_activations_df = feature_analyzer.get_top_activations(table_name = table_name, feature_id = 3000, top_k = 25)
-    # reconstructed_df = feature_analyzer.reconstruct_context_text(df=top_activations_df)
-    # reconstructed_df = feature_analyzer.reconstruct_token_text(df = reconstructed_df)
-    # reconstructed_df = feature_analyzer.get_context_string(df = reconstructed_df)
-    # # activation_distribution_res = feature_analyzer.get_activation_distribution(table_name = table_name, feature_id = 3000)
-    # token_id = feature_analyzer.tokenizer.encode("love")[0]
-    # res = feature_analyzer.get_activation_distribution_per_token_id(table_name = table_name, token_id = token_id)
 
-    # print(res)
-
-    dead_features = feature_analyzer.get_dead_features(table_name = table_name)
-    print(dead_features)
-
-
-    # feature_analyzer.con.execute(f"ALTER TABLE {table_name} DROP COLUMN token_text")
-    # print("dropped existing token text column")
-    #feature_analyzer.con.execute(f"ALTER TABLE {table_name} DROP COLUMN context_text")
-    # print("dropped existing context text column")
-
-
-
-    # python -c "import duckdb; con = duckdb.connect('hf_trial.db'); con.execute('DROP TABLE IF EXISTS hf_16x_full'); print('done')"
     
 
 

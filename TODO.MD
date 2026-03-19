@@ -59,6 +59,12 @@
 - **Pinning sanity checks (activation space):** clamp selected features on and verify reconstruction shifts consistently along that feature’s decoder direction.
 - **Monosemanticity heuristics:** cluster/keyword-score top-K contexts per feature to estimate “topic purity” and feature drift.
 
+### Limitation — `feature_similarity_cosine_similarity` operates in token-type space
+
+`feature_similarity_cosine_similarity` computes cosine similarity by treating each feature as a sparse vector over the vocabulary (aggregating activation values by `token_id`). This means two features that fire on the same token in different contexts (e.g. “bank” in financial vs. river contexts) will appear similar even if they represent distinct concepts.
+
+Context-aware similarity would require a per-occurrence key. One option is to hash a short sub-window of `context_token_ids` around the activating token (e.g. ±2 tokens at positions 8–12) as a surrogate occurrence ID, then join on that hash instead of `token_id`. Narrower windows = looser grouping (closer to token-type); wider windows = stricter (requires near-identical context). Not implemented because the schema has no explicit occurrence ID.
+
 ### P4 — Repo hygiene
 
 - **Purge wandb artifacts from git history:** use `git filter-repo --path wandb/ --path notebooks/wandb/ --invert-paths` then force-push. All collaborators will need to re-clone afterward.

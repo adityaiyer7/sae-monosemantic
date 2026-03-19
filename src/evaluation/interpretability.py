@@ -341,4 +341,12 @@ def main(expansion_factor: int, _lambda: float):
 
 
 if __name__ == "__main__":
-    main(expansion_factor=4, _lambda=1e-4)
+    configs = [
+        (8, 1e-4),
+        (16, 1e-2),
+        (16, 1e-4),
+        (32, 1e-2),
+        (32, 1e-4)
+    ]
+    for expansion_factor, _lambda in configs:
+        main(expansion_factor=expansion_factor, _lambda=_lambda)
