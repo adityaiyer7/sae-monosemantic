@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 
 class ScalableFeatureExtractor:
-    def __init__(self, model, device, expansion_factor: int, _lambda: float, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07) -> None:
+    def __init__(self, model, device, expansion_factor: int, _lambda: float, batch_size:int = 512, output_buffer_size:int = 10000, threshold:float = 0.07, context_window: int = 10) -> None:
         self.model = model
         self.batch_size = batch_size
         self.output_buffer_size = output_buffer_size
@@ -32,6 +32,7 @@ class ScalableFeatureExtractor:
         self.alive_features: set[int] = set()
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.threshold = threshold
+        self.context_window = context_window
 
         # Setup output directory for parquet files
         self.output_dir = Path(f"features/features_{expansion_factor}x_{_lambda}")
@@ -108,7 +109,7 @@ class ScalableFeatureExtractor:
             self.feature_mapper_size = 0
 
 
-    def process_chunk_batched(self, chunk_file, chunk_idx: int, context_window: int = 10):
+    def process_chunk_batched(self, chunk_file, chunk_idx: int):
         """Run the SAE over a single activation chunk file and write results to a parquet file.
 
         Loads token IDs and residual activations from chunk_file, processes them in batches,
@@ -160,8 +161,8 @@ class ScalableFeatureExtractor:
 
                 # for each position, gather context tokens
                 # shape: [batch_size, 2*context_window+1]
-                context_start_idx = -context_window
-                context_end_index = context_window + 1
+                context_start_idx = -self.context_window
+                context_end_index = self.context_window + 1
                 offsets = torch.arange(context_start_idx, context_end_index, device='cpu')
 
                 context_indices = positions.unsqueeze(1) + offsets
