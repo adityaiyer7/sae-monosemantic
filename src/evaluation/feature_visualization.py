@@ -31,7 +31,7 @@ class FeatureAnalyzer:
         model_hidden_dim_size: int = 768,
         context_window: int = 10,
         groq_model: str = "openai/gpt-oss-120b",
-        openai_model: str = "gpt-5.4-mini",
+        openai_model: str = "gpt-5.4",
     ) -> None:
         """
         Initialize the FeatureAnalyzer with a HuggingFace dataset and a local DuckDB database.
@@ -184,6 +184,7 @@ class FeatureAnalyzer:
     def get_most_active_features(self, table_name: str) -> pd.DataFrame:
         """
         Count how many distinct activation records exist per feature dimension.
+        Note that this is not in terms of activation value. 
 
         Args:
             table_name: Name of the activations table to query.
@@ -199,6 +200,42 @@ class FeatureAnalyzer:
             ORDER BY num_features DESC
         """
         return self.con.execute(NUM_FEATURES_QUERY).df()
+
+    def rank_features_by_selectivity(self, table_name: str, min_activations: int | None = None) -> pd.DataFrame:
+        """
+        Rank all active features by a selectivity score.
+
+        Selectivity is defined as ``mean_activation / log(num_activations + 1)``, which
+        rewards features that fire with high magnitude but infrequently — a useful proxy
+        for monosemanticity. Dead features (zero activations) are excluded automatically
+        since they produce no rows in the activations table.
+
+        Args:
+            table_name: Name of the activations table to query.
+            min_activations: If provided, exclude features with fewer than this many
+                activation records. Useful for filtering out features that fire too
+                rarely to be meaningfully interpreted. Defaults to ``None`` (no filter).
+
+        Returns:
+            DataFrame with columns ``[feature_id, num_activations, mean_activation,
+            unique_token_count, selectivity_score]``, sorted descending by
+            ``selectivity_score``. Use ``.head(k)`` for the most selective features
+            and ``.tail(k)`` for the least selective.
+        """
+        having_clause = f"HAVING COUNT(*) >= {min_activations}" if min_activations is not None else ""
+        SELECTIVITY_QUERY = f"""
+            SELECT
+                feature_id,
+                COUNT(*) AS num_activations,
+                AVG(activation_value) AS mean_activation,
+                COUNT(DISTINCT token_id) AS unique_token_count,
+                AVG(activation_value) / LOG(COUNT(*) + 1) AS selectivity_score
+            FROM {table_name}
+            GROUP BY feature_id
+            {having_clause}
+            ORDER BY selectivity_score DESC
+        """
+        return self.con.execute(SELECTIVITY_QUERY).df()
 
     def get_feature_density(self, table_name: str, num_unique_tokens: int = 50257) -> pd.DataFrame:
         """
@@ -561,36 +598,42 @@ class FeatureAnalyzer:
                 call OpenAI directly.
 
         Returns:
-            The input DataFrame with an added ``llm_label`` column containing the
-            LLM-generated label string (same value repeated for every row).
+            The input DataFrame with added ``llm_label`` and ``llm_reasoning``
+            columns (same value repeated for every row).
         """
         if "context_string" not in input_df.columns:
             input_df = self.get_context_string(input_df)
         context_strings = input_df["context_string"].tolist()
-        label = self.llm_judge_classification(context_strings, use_groq=use_groq)
-        input_df["llm_label"] = label
+        result = self.llm_judge_classification(context_strings, use_groq=use_groq)
+        input_df["llm_label"] = result["label"]
+        input_df["llm_reasoning"] = result["reasoning"]
         return input_df
 
-    def get_token_type_breakdown(self, feature_id: int, table_name: str) -> dict[str, dict]:
+    def get_token_type_breakdown(self, feature_id: int, table_name: str, sample_size: int | None = 1000) -> dict[str, dict]:
         """
         Compute the distribution of linguistic properties for tokens that activate a feature.
 
-        Fetches all activation records for the feature, reconstructs token and context text,
+        Fetches activation records for the feature, reconstructs token and context text,
         then runs spaCy to classify each activating token. Aggregates counts over each property.
 
         Args:
             feature_id: SAE feature dimension index to analyse.
             table_name: Name of the activations table to query.
+            sample_size: Maximum number of activation records to process, sampled by
+                highest activation value. Defaults to 1000. Pass ``None`` to process
+                all records (may OOM for high-frequency features).
 
         Returns:
             Dictionary mapping each property name to a ``{value: count}`` sub-dictionary.
             Property names: ``pos``, ``ner``, ``is_stop``, ``is_punct``, ``dep``,
             ``subword_position``, ``is_numeric``, ``is_upper``, ``is_title``, ``is_whitespace``.
         """
+        limit_clause = f"ORDER BY activation_value DESC LIMIT {sample_size}" if sample_size is not None else ""
         FILTER_QUERY = f"""
         SELECT *
         FROM {table_name}
         WHERE feature_id = {feature_id}
+        {limit_clause}
         """
         feature_df = self.con.execute(FILTER_QUERY).df()
         feature_df = self.reconstruct_token_text(feature_df)
@@ -612,7 +655,7 @@ class FeatureAnalyzer:
     # Utility Methods
     # -------------------------------------------------------------------------
 
-    def llm_judge_classification(self, context_strings: list[str], use_groq: bool = True) -> str:
+    def llm_judge_classification(self, context_strings: list[str], use_groq: bool = True) -> dict[str, str]:
         """
         Send a batch of context strings to an LLM and return its classification label.
 
@@ -623,8 +666,8 @@ class FeatureAnalyzer:
                 If ``False``, call OpenAI directly using ``self.openai_model``.
 
         Returns:
-            The raw text content of the LLM's response — expected to be a short human-readable
-            label describing the linguistic pattern shared across the provided contexts.
+            A dict with ``label`` (parsed short label) and ``reasoning`` (the
+            chain-of-thought reasoning the LLM produced before the label).
         """
         if use_groq:
             client = OpenAI(base_url=self.groq_base_url, api_key=os.getenv("GROQ_API_KEY"))
@@ -643,7 +686,17 @@ class FeatureAnalyzer:
                 {"role": "user", "content": user_message},
             ],
         )
-        return response.choices[0].message.content
+        raw = response.choices[0].message.content
+
+        label = raw.strip()
+        reasoning = ""
+        for line in reversed(raw.strip().splitlines()):
+            if line.strip().lower().startswith("label:"):
+                label = line.split(":", 1)[1].strip()
+                reasoning = raw[:raw.rfind(line)].strip()
+                break
+
+        return {"label": label, "reasoning": reasoning}
 
     def join_token_with_context(self, input_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -822,20 +875,3 @@ class FeatureAnalyzer:
         self.con.close()
 
 
-def main(expansion_factor: int, _lambda: float):
-    project_root = Path(__file__).parents[2]
-    load_dotenv(project_root / ".env")
-
-    HF_dataset_path = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x_{_lambda}"
-    table_name=f"hf_{expansion_factor}x_{str(_lambda).replace('.', '_')}_full"
-
-    feature_analyzer = FeatureAnalyzer(
-        HF_dataset_path = HF_dataset_path,
-        db_name = "hf_trial",
-        expansion_factor = expansion_factor
-    )
-    feature_analyzer.create_features_table(table_name = table_name)
-
-
-if __name__ == "__main__":
-    main(expansion_factor=8, _lambda=1e-4)
