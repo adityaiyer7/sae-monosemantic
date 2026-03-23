@@ -102,8 +102,8 @@ class SAETrainer:
                         # Reinitialize weights for each dead neuron using its sampled input
                         for idx, sample_idx in enumerate(sampled_indices):
                             vec = F.normalize(resample_activations[sample_idx], dim = 0)
-                            self.model.W_enc[:,dead_neurons[idx]] = vec
-                            self.model.W_dec[dead_neurons[idx], :] = vec
+                            self.model.W_enc.data[:,dead_neurons[idx]] = vec
+                            self.model.W_dec.data[dead_neurons[idx], :] = vec
                         
                         self.model.b_enc.data[dead_neurons] = -torch.rand(len(dead_neurons), device=self.device) * 0.01
 
