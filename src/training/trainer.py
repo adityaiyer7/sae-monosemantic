@@ -100,9 +100,14 @@ class SAETrainer:
                         # sampled_indices[i] gives us the input to use for dead neuron i 
                     
                         # Reinitialize weights for each dead neuron using its sampled input
+                        alive_mask = torch.ones(self.model.d_hidden, dtype=torch.bool, device=self.device)
+                        alive_mask[dead_neurons] = False
+                        avg_alive_enc_norm = self.model.W_enc.data[:, alive_mask].norm(dim=0).mean()
+
                         for idx, sample_idx in enumerate(sampled_indices):
-                            vec = F.normalize(resample_activations[sample_idx], dim = 0)
-                            self.model.W_enc.data[:,dead_neurons[idx]] = vec
+                            centered = resample_activations[sample_idx] - self.model.b_dec.data
+                            vec = F.normalize(centered, dim = 0)
+                            self.model.W_enc.data[:,dead_neurons[idx]] = vec * avg_alive_enc_norm * 0.2
                             self.model.W_dec.data[dead_neurons[idx], :] = vec
                         
                         self.model.b_enc.data[dead_neurons] = -torch.rand(len(dead_neurons), device=self.device) * 0.01
