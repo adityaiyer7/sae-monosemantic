@@ -107,7 +107,7 @@ class SAETrainer:
                         for idx, sample_idx in enumerate(sampled_indices):
                             centered = resample_activations[sample_idx] - self.model.b_dec.data
                             vec = F.normalize(centered, dim = 0)
-                            self.model.W_enc.data[:,dead_neurons[idx]] = vec * avg_alive_enc_norm * 0.2
+                            self.model.W_enc.data[:,dead_neurons[idx]] = vec * avg_alive_enc_norm * 0.05
                             self.model.W_dec.data[dead_neurons[idx], :] = vec
                         
                         self.model.b_enc.data[dead_neurons] = -torch.rand(len(dead_neurons), device=self.device) * 0.01
