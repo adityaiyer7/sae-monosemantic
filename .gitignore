@@ -42,3 +42,6 @@ wandb/
 # Model weights
 *.pth
 **/*.pth
+
+# Claude config
+.claude/
