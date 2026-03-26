@@ -41,3 +41,4 @@ I believe AI can help boost productivity, but the goal of this project is learni
 6. Time Tracking. 
 7. Refactoring code.
 8. Brainstorming data pipeline architecture and debugging SQL/API integrations.
+9. Feature Visualization notebook. 

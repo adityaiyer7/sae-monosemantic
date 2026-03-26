@@ -497,7 +497,7 @@ class FeatureAnalyzer:
             GROUP BY feature_id
         )
         SELECT
-            SUM(a.activation * b.activation) / (na.norm * nb.norm) AS cosine_similarity
+            SUM(a.activation * b.activation) / (ANY_VALUE(na.norm) * ANY_VALUE(nb.norm)) AS cosine_similarity
         FROM agg a
         JOIN agg b ON a.token_id = b.token_id AND a.feature_id = {feature_id_i} AND b.feature_id = {feature_id_j}
         JOIN norms na ON na.feature_id = {feature_id_i}
@@ -715,7 +715,7 @@ class FeatureAnalyzer:
         """
         def build_joined(row):
             tokens = row["context_text"]
-            mid = len(tokens) // 2
+            mid = self.context_window
             return ''.join(tokens[:mid] + [row["token_text"]] + tokens[mid + 1:])
 
         input_df["token_joined_context"] = input_df.apply(build_joined, axis=1)

@@ -153,22 +153,6 @@ def run_training(expansion_factor: int, _lambda: float):
         )
     })
 
-    # 4. Visualize Training Loss
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(trainer.training_losses, color='#2e86ab', linewidth=0.8, alpha=0.9, label='Training loss')
-    if len(trainer.training_losses) > 50:
-        window = min(50, len(trainer.training_losses) // 10)
-        smoothed = pd.Series(trainer.training_losses).rolling(window=window, min_periods=1).mean()
-        ax.plot(smoothed.values, color='#e94f37', linewidth=2, label=f'Training smoothed (window={window})')
-    ax.set_xlabel('Batch', fontsize=12)
-    ax.set_ylabel('Loss', fontsize=12)
-    ax.set_title('SAE Training Loss', fontsize=14)
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(project_root / "model_weights" / f"training_loss_{expansion_factor}x_{_lambda}.png")
-    plt.close()
-
     # intermediate save
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
     print(f" model weights saved to {MODEL_SAVE_PATH}")
@@ -185,22 +169,6 @@ def run_training(expansion_factor: int, _lambda: float):
             xname="Step"
         )
     })
-
-    # 6. Visualize Validation Loss
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(validation_loss, color='#44af69', linewidth=0.8, alpha=0.9, label='Validation loss')
-    if len(validation_loss) > 10:
-        window = min(10, len(validation_loss) // 5)
-        smoothed = pd.Series(validation_loss).rolling(window=window, min_periods=1).mean()
-        ax.plot(smoothed.values, color='#2e86ab', linewidth=2, linestyle='--', label=f'Smoothed (window={window})')
-    ax.set_xlabel('Batch', fontsize=12)
-    ax.set_ylabel('Loss', fontsize=12)
-    ax.set_title('SAE Validation Loss', fontsize=14)
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(project_root / "model_weights" / f"validation_loss_{expansion_factor}x_{_lambda}.png")
-    plt.close()
 
     # 7. Save Model
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
@@ -233,22 +201,6 @@ def run_training(expansion_factor: int, _lambda: float):
             xname="Step"
         )
     })
-
-    # 9. Visualize Test Loss
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(test_loss, color='#f4a261', linewidth=0.8, alpha=0.9, label='Test loss')
-    if len(test_loss) > 10:
-        window = min(10, len(test_loss) // 5)
-        smoothed = pd.Series(test_loss).rolling(window=window, min_periods=1).mean()
-        ax.plot(smoothed.values, color='#e76f51', linewidth=2, linestyle='--', label=f'Smoothed (window={window})')
-    ax.set_xlabel('Batch', fontsize=12)
-    ax.set_ylabel('Loss', fontsize=12)
-    ax.set_title('SAE Test Loss', fontsize=14)
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(project_root / "model_weights" / f"test_loss_{expansion_factor}x_{_lambda}.png")
-    plt.close()
 
     # 10. Compute Loss Statistics
     stats_df = (
