@@ -35,7 +35,7 @@ class ScalableFeatureExtractor:
         self.context_window = context_window
 
         # Setup output directory for parquet files
-        self.output_dir = Path(f"features/features_{expansion_factor}x_{_lambda}")
+        self.output_dir = Path(f"features/features_{expansion_factor}x_{_lambda}_sampling")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
 
@@ -224,13 +224,13 @@ def main(expansion_factor: int, _lambda: float):
     activation_chunk_dir = str(project_root / 'data' / 'gpt2_activation_chunks')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    HF_DATASET_REPO = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x_{_lambda}"
+    HF_DATASET_REPO = f"thedarkknight7/SAE_monosemanticity_features_{expansion_factor}x_{_lambda}_sampling"
 
     files = sorted(glob.glob(f"{activation_chunk_dir}/*.pt"), key = natural_sort_key)
 
     # Download model weights from HF bucket
     HF_BUCKET = "hf://buckets/thedarkknight7/sae-for-monosemanticity-model-weights"
-    weight_filename = f"model_weights_{expansion_factor}x_{_lambda}.pth"
+    weight_filename = f"model_weights_{expansion_factor}x_{_lambda}_sampling.pth"
     local_weights_dir = project_root / "model_weights"
     local_weights_path = local_weights_dir / weight_filename
 
@@ -263,7 +263,7 @@ def main(expansion_factor: int, _lambda: float):
         project="sae-for-monosemanticity",
         job_type="feature-extraction",
         config=wandb_config,
-        name=f"feature-extraction-{expansion_factor}x_{_lambda}"
+        name=f"feature-extraction-{expansion_factor}x_{_lambda}_sampling"
     )
 
     state_dict = torch.load(local_weights_path, weights_only=True, map_location=device)
@@ -293,7 +293,7 @@ def main(expansion_factor: int, _lambda: float):
     print(f"\nCompleted processing {len(files)} chunks.")
     print(f"Parquet files saved to: {feature_extractor.output_dir}")
 
-    alive_features_filename = f"alive_features_{expansion_factor}x_{_lambda}.json"
+    alive_features_filename = f"alive_features_{expansion_factor}x_{_lambda}_sampling.json"
     alive_features_path = feature_extractor.output_dir / alive_features_filename
     with open(alive_features_path, "w") as f:
         json.dump(sorted(feature_extractor.alive_features), f)
@@ -343,6 +343,9 @@ def main(expansion_factor: int, _lambda: float):
 
 if __name__ == "__main__":
     configs = [
+        (4, 1e-2),
+        (4, 1e-4),
+        (8, 1e-2),
         (8, 1e-4),
         (16, 1e-2),
         (16, 1e-4),
