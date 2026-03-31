@@ -1,0 +1,14 @@
+services:
+  sae-explorer:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      # Cache HuggingFace downloads (tokenizer, parquet row groups) across restarts
+      - hf_cache:/root/.cache/huggingface
+    restart: unless-stopped
+
+volumes:
+  hf_cache:
