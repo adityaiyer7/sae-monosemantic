@@ -1,4 +1,4 @@
-# SAE Monosemantic (WIP)
+# Sparse Autoencoders for Monosemanticity
 
 ## SAE Feature Explorer (Docker)
 
@@ -27,8 +27,8 @@ Open `.env` and fill in your credentials:
 | Variable | Required | Description |
 |---|---|---|
 | `HF_TOKEN` | Yes | HuggingFace read token — used to fetch feature datasets |
-| `GROQ_API_KEY` | Optional | Enables LLM feature labelling via Groq (`openai/gpt-oss-120b`) |
-| `OPENAI_API_KEY` | Optional | Enables LLM feature labelling via OpenAI (`gpt-5.4`) |
+| `GROQ_API_KEY` | Optional (Recommended)| Enables LLM feature labelling via Groq (`openai/gpt-oss-120b`) |
+| `OPENAI_API_KEY` | Optional (Recommended) | Enables LLM feature labelling via OpenAI (`gpt-5.4`) |
 | `WANDB_API_KEY` | Optional | Only needed if running training notebooks |
 
 **3. Build and run**
