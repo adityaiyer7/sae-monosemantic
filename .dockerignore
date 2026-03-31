@@ -1,0 +1,33 @@
+# Exclude large and irrelevant files from the Docker build context
+
+# Local database (117GB — data is fetched from HuggingFace at runtime)
+*.db
+
+# Model weights (not needed for the viewer)
+*.pth
+*.pt
+
+# Virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Secrets
+.env
+
+# Data directories
+data/
+features/
+
+# Notebooks and development artifacts
+notebooks/
+*.ipynb
+
+# Git
+.git/
+.gitignore
+
+# Misc
+*.log
+.DS_Store
