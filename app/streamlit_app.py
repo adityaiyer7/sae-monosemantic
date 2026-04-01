@@ -23,14 +23,23 @@ import streamlit as st
 # Must be set before importing anything that touches HuggingFace.
 if not os.environ.get("HF_TOKEN"):
     st.set_page_config(page_title="SAE Feature Explorer", layout="wide")
-    st.error(
-        "**HF_TOKEN is not set.**\n\n"
-        "This app queries HuggingFace datasets and requires an access token.\n\n"
-        "**How to fix:**\n"
-        "1. Copy `.env.example` to `.env`\n"
-        "2. Add your HuggingFace token: `HF_TOKEN=hf_...`\n"
-        "3. Restart with `docker compose up` (or `streamlit run app/streamlit_app.py`)"
-    )
+    _is_hf_space = bool(os.environ.get("SPACE_ID"))
+    if _is_hf_space:
+        st.error(
+            "**HF_TOKEN is not set.**\n\n"
+            "This app queries HuggingFace datasets and requires an access token.\n\n"
+            "**How to fix:** Go to **Settings → Variables and secrets** for this Space "
+            "and add `HF_TOKEN` with your HuggingFace read token."
+        )
+    else:
+        st.error(
+            "**HF_TOKEN is not set.**\n\n"
+            "This app queries HuggingFace datasets and requires an access token.\n\n"
+            "**How to fix:**\n"
+            "1. Copy `.env.example` to `.env`\n"
+            "2. Add your HuggingFace token: `HF_TOKEN=hf_...`\n"
+            "3. Restart with `docker compose up` (or `streamlit run app/streamlit_app.py`)"
+        )
     st.stop()
 
 from app.components.config_selector import render_config_selector
