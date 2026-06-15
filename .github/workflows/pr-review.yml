@@ -1,0 +1,11 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  ai-review:
+    uses: adityaiyer7/workflows/.github/workflows/diffguard-reusable.yml@main
+    secrets:
+      OPEN_ROUTER_KEY: ${{ secrets.OPEN_ROUTER_KEY }}
