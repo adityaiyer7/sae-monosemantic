@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, labeled, unlabeled]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   ai-review:
     uses: adityaiyer7/workflows/.github/workflows/diffguard-reusable.yml@main
