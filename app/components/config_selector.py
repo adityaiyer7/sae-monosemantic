@@ -81,13 +81,13 @@ def render_config_selector() -> dict:
 
         st.divider()
 
-        # LLM analysis — only show providers whose API key is present
-        has_groq = bool(os.environ.get("GROQ_API_KEY"))
-        has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+        # LLM analysis — only show providers whose API key is present.
+        # On HF Space (detected via SPACE_ID env var) restrict to Groq only.
+        is_hf_space = bool(os.environ.get("SPACE_ID"))
         available_providers = []
-        if has_groq:
+        if os.environ.get("GROQ_API_KEY"):
             available_providers.append("Groq (openai/gpt-oss-120b)")
-        if has_openai:
+        if not is_hf_space and os.environ.get("OPENAI_API_KEY"):
             available_providers.append("OpenAI (gpt-5.4)")
 
         llm_provider = None
@@ -99,6 +99,8 @@ def render_config_selector() -> dict:
                 help="Select which LLM to use for automatic feature labelling. "
                      "Only providers with a configured API key are shown.",
             )
+        elif is_hf_space:
+            st.caption("Set GROQ_API_KEY as a Space secret to enable LLM feature labelling.")
         else:
             st.caption("Set GROQ_API_KEY or OPENAI_API_KEY in .env to enable LLM feature labelling.")
 
